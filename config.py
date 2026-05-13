@@ -140,6 +140,93 @@ DEFAULT_SECTOR_INDEX = "^NSEI"  # Nifty 50 fallback
 
 INR_PER_CR = 1_00_00_000  # 1 Crore = 10 million
 
+# ---------------------------------------------------------------------------
+# NSE Indices — tracked separately in the Indices tab
+# ---------------------------------------------------------------------------
+
+# yfinance tickers for all NSE indices, grouped by category.
+# Indices with no confirmed yfinance ticker are included with best-guess
+# symbols; fetch failures are silently skipped.
+NSE_INDEX_TICKERS: dict[str, dict[str, str]] = {
+    "Broad Market": {
+        "Nifty 50":              "^NSEI",
+        "Nifty Next 50":         "^NFNXT50",
+        "Nifty 100":             "^CNX100",
+        "Nifty 200":             "^CNX200",
+        "Nifty 500":             "^CRSLDX",
+        "Nifty Midcap 50":       "^NIFMID50",
+        "Nifty Midcap 100":      "^CNXMC",
+        "Nifty Midcap 150":      "^NIFMDCP150",
+        "Nifty Smallcap 50":     "^NSMCAP50",
+        "Nifty Smallcap 100":    "^CNXSC",
+        "Nifty Smallcap 250":    "^NSMCAP250",
+        "Nifty MidSmallcap 400": "^NSMIDCP",
+        "Nifty LargeMidcap 250": "^NIFTYLARGMID250",
+    },
+    "Sectoral": {
+        "Nifty Bank":               "^NSEBANK",
+        "Nifty Auto":               "^CNXAUTO",
+        "Nifty Financial Services": "^CNXFINANCE",
+        "Nifty FMCG":               "^CNXFMCG",
+        "Nifty IT":                 "^CNXIT",
+        "Nifty Media":              "^CNXMEDIA",
+        "Nifty Metal":              "^CNXMETAL",
+        "Nifty Oil & Gas":          "^CNXOIL",
+        "Nifty Pharma":             "^CNXPHARMA",
+        "Nifty PSU Bank":           "^CNXPSUBANK",
+        "Nifty Private Bank":       "^NIFPVTBANK",
+        "Nifty Realty":             "^CNXREALTY",
+        "Nifty Energy":             "^CNXENERGY",
+    },
+    "Thematic": {
+        "Nifty Capital Markets":             "^NIFCAPMKT",
+        "Nifty Commodities":                 "^CNXCMDT",
+        "Nifty Core Housing":                "^NIFCOREHS",
+        "Nifty CPSE":                        "^CNXCPSE",
+        "Nifty EV & New Age Automotive":     "^NIFEV",
+        "Nifty Housing":                     "^NIFHOUSING",
+        "Nifty India Consumption":           "^CNXCONSUM",
+        "Nifty India Defence":               "^NIFINDDEF",
+        "Nifty India Digital":               "^NIFINDDIG",
+        "Nifty India Infrastructure & Logistics": "^NIFINFLOGI",
+        "Nifty India Internet":              "^NIFINDINT",
+        "Nifty India Manufacturing":         "^NIFINDMFG",
+        "Nifty India New Age Consumption":   "^NIFINNAC",
+        "Nifty India Railways PSU":          "^NIFRAILPSU",
+        "Nifty India Tourism":               "^NIFINDTOU",
+        "Nifty Infrastructure":              "^CNXINFRA",
+        "Nifty IPO":                         "^NIFIPO",
+        "Nifty MNC":                         "^CNXMNC",
+        "Nifty Mobility":                    "^NIFMOBIL",
+        "Nifty PSE":                         "^CNXPSE",
+        "Nifty REITs & InvITs":              "^NIFREIT",
+        "Nifty Rural":                       "^NIFRURAL",
+        "Nifty Non-Cyclical Consumer":       "^NIFNCYCCON",
+        "Nifty Services Sector":             "^CNXSERVICE",
+        "Nifty Transportation & Logistics":  "^NIFTRL",
+        "Nifty SME Emerge":                  "^NIFSMEEMERGE",
+    },
+}
+
+# Cache files for index screener
+INDEX_OHLCV_FILE      = os.path.join(DATA_DIR, "index_ohlcv.pkl")
+INDEX_RESULTS_FILE    = os.path.join(DATA_DIR, "index_results.pkl")
+INDEX_SNAPSHOTS_FILE  = os.path.join(DATA_DIR, "index_snapshots.pkl")
+
+# EMA stack hard filter for indices (10 > 20 > 50 must all be true)
+INDEX_EMA_STACK_FILTER = True
+
+# Composite score weights for indices (must sum to 100).
+# No sector outperformance — those 15 pts are added to nifty500_outperf.
+INDEX_SCORE_WEIGHTS = {
+    "52w_high_proximity": 20,
+    "nifty500_outperf":   30,   # 1-month outperformance vs Nifty 500
+    "close_to_kma":        5,   # Proximity gradient within ±1.5% of 10 EMA
+    "rsi_score":          15,   # RSI normalised 55→80 band
+    "rmv_score":           5,   # Lower RMV = higher score
+    "rs_trend":           25,   # RS line EMA10 > EMA20 → uptrend
+}
+
 # Pattern columns produced by the screener (boolean).
 # Adding a new pattern: implement detect_X() in indicators.py, call it in
 # screener.py/_process_stock(), add the key here — everything else updates

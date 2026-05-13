@@ -10,9 +10,11 @@ Runs the full pipeline:
   2. Download 1-year price data
   3. Fetch stock info (PE, sector, market cap)
   4. Fetch benchmark + sector indices + Nifty 500
-  5. Run main screener + save snapshot
-  6. Run IPO Base screener
-  7. Run IPO Inside Bar screener
+  5. Fetch NSE index OHLCV
+  6. Run main screener + save snapshot
+  7. Run IPO Base screener
+  8. Run IPO Inside Bar screener
+  9. Run NSE Index screener + save snapshot
 """
 
 import argparse
@@ -49,6 +51,8 @@ def run(force_info: bool = False) -> None:
     )
     from src.screener import run_screener, run_ipo_screener, run_ipo_inside_bar_screener
     from src.tracker import save_snapshot
+    from src.index_screener import fetch_index_ohlcv, save_index_ohlcv, run_index_screener, save_index_results
+    from src.index_tracker import save_index_snapshot
 
     os.makedirs(DATA_DIR, exist_ok=True)
 
@@ -57,37 +61,43 @@ def run(force_info: bool = False) -> None:
     logger.info("=" * 60)
 
     # 1. NSE equity list
-    logger.info("[1/7] Fetching NSE equity list…")
+    logger.info("[1/9] Fetching NSE equity list…")
     stocks_df = fetch_nifty1000_stocks(force_refresh=force_info)
     tickers   = stocks_df["yf_ticker"].tolist()
     logger.info("      %d tickers loaded", len(tickers))
 
     # 2. Price data
-    logger.info("[2/7] Downloading 1-year daily price data…")
+    logger.info("[2/9] Downloading 1-year daily price data…")
     price_data = fetch_price_data(tickers)
     save_price_data(price_data)
     logger.info("      Price data saved for %d tickers", len(price_data))
 
     # 3. Stock info
     if not force_info and is_info_cache_fresh():
-        logger.info("[3/7] Stock info cache is fresh — skipping download")
+        logger.info("[3/9] Stock info cache is fresh — skipping download")
         stock_info = load_stock_info() or {}
     else:
-        logger.info("[3/7] Fetching stock info (PE, sector, market cap)…")
+        logger.info("[3/9] Fetching stock info (PE, sector, market cap)…")
         stock_info = fetch_stock_info(list(price_data.keys()))
         save_stock_info(stock_info)
         logger.info("      Info saved for %d tickers", len(stock_info))
 
     # 4. Benchmark + sector indices + Nifty 500
-    logger.info("[4/7] Fetching benchmark, sector indices and Nifty 500…")
+    logger.info("[4/9] Fetching benchmark, sector indices and Nifty 500…")
     benchmark      = fetch_benchmark()
     nifty500       = fetch_nifty500()
     sector_indices = fetch_all_sector_indices()
     save_index_data(benchmark, sector_indices, nifty500)
     logger.info("      %d sector indices fetched", len(sector_indices))
 
-    # 5. Main screener + snapshot
-    logger.info("[5/7] Running main screener…")
+    # 5. NSE Index OHLCV
+    logger.info("[5/9] Fetching NSE index OHLCV data…")
+    index_ohlcv = fetch_index_ohlcv()
+    save_index_ohlcv(index_ohlcv)
+    logger.info("      %d NSE indices loaded", len(index_ohlcv))
+
+    # 6. Main screener + snapshot
+    logger.info("[6/9] Running main screener…")
     results = run_screener(price_data, stock_info, sector_indices, benchmark)
     logger.info("      %d stocks passed all filters", len(results))
     with open(SCREENER_RESULTS_FILE, "wb") as f:
@@ -96,19 +106,27 @@ def run(force_info: bool = False) -> None:
     n_snap = save_snapshot(results, force=True)
     logger.info("      Snapshot saved: %d stocks captured for today", n_snap)
 
-    # 6. IPO Base screener
-    logger.info("[6/7] Running IPO Base screener…")
+    # 7. IPO Base screener
+    logger.info("[7/9] Running IPO Base screener…")
     ipo_results = run_ipo_screener(price_data, stock_info, sector_indices, nifty500)
     logger.info("      %d IPO base stocks passed", len(ipo_results))
     with open(IPO_RESULTS_FILE, "wb") as f:
         pickle.dump(ipo_results, f)
 
-    # 7. IPO Inside Bar screener
-    logger.info("[7/7] Running IPO Inside Bar screener…")
+    # 8. IPO Inside Bar screener
+    logger.info("[8/9] Running IPO Inside Bar screener…")
     ipo_ib_results = run_ipo_inside_bar_screener(price_data, stock_info, sector_indices, nifty500)
     logger.info("      %d IPO inside-bar setups found", len(ipo_ib_results))
     with open(IPO_IB_RESULTS_FILE, "wb") as f:
         pickle.dump(ipo_ib_results, f)
+
+    # 9. NSE Index screener + snapshot
+    logger.info("[9/9] Running NSE Index screener…")
+    index_results = run_index_screener(index_ohlcv, nifty500)
+    logger.info("      %d indices passed EMA stack filter", len(index_results))
+    save_index_results(index_results)
+    n_idx_snap = save_index_snapshot(index_results, force=True)
+    logger.info("      Index snapshot saved: %d indices", n_idx_snap)
 
     # Timestamp
     now_ist = datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S IST")
