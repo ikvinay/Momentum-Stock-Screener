@@ -100,6 +100,18 @@ def load_price_data() -> Optional[Dict[str, pd.DataFrame]]:
 def _fetch_single_info(ticker: str) -> dict:
     try:
         info = yf.Ticker(ticker).info
+
+        float_shares    = info.get("floatShares")
+        shares_out      = info.get("sharesOutstanding")
+        held_insiders   = info.get("heldPercentInsiders")
+
+        if float_shares and shares_out and shares_out > 0:
+            free_float_pct = round(float_shares / shares_out * 100, 1)
+        elif held_insiders is not None:
+            free_float_pct = round((1.0 - held_insiders) * 100, 1)
+        else:
+            free_float_pct = None
+
         return {
             "symbol": ticker,
             "company_name": info.get("longName") or ticker.replace(".NS", ""),
@@ -107,6 +119,7 @@ def _fetch_single_info(ticker: str) -> dict:
             "industry": info.get("industry") or "Unknown",
             "trailing_pe": info.get("trailingPE"),
             "market_cap": info.get("marketCap"),  # in INR
+            "free_float_pct": free_float_pct,
         }
     except Exception as exc:
         logger.debug(f"Info fetch failed for {ticker}: {exc}")
@@ -117,6 +130,7 @@ def _fetch_single_info(ticker: str) -> dict:
             "industry": "Unknown",
             "trailing_pe": None,
             "market_cap": None,
+            "free_float_pct": None,
         }
 
 

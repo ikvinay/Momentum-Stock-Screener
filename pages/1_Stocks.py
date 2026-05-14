@@ -5,7 +5,7 @@ Stocks page — NSE Momentum Screener, IPO Setups, Performance Tracker.
 import streamlit as st
 
 from ui.components import (
-    inject_css, tick, colour_pct, colour_rsi, colour_rmv, colour_rs, colour_ret,
+    inject_css, tick, colour_pct, colour_rsi, colour_rmv, colour_rs, colour_ret, colour_float,
     render_stock_chart, render_top_stocks, render_ipo_section,
     DISPLAY_COLS_HEAD, DISPLAY_COLS_TAIL, STYLE_COLS, NUM_FORMAT,
     TRACKER_BASE_COLS, TRACKER_NUM_FORMAT,

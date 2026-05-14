@@ -69,6 +69,18 @@ def colour_sentiment(val) -> str:
     return "color: #6b7280"
 
 
+def colour_float(val) -> str:
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+        return ""
+    if val < 25:
+        return "color: #22c55e; font-weight: bold"
+    if val < 50:
+        return "color: #86efac"
+    if val > 75:
+        return "color: #ef4444"
+    return ""
+
+
 def colour_score(val) -> str:
     if val is None or (isinstance(val, float) and pd.isna(val)):
         return ""
@@ -93,7 +105,7 @@ DISPLAY_COLS_HEAD = [
     "RSI", "RMV", "% from 52W High",
     "Weekly %", "Monthly %", "Benchmark Outperf %", "Sector Outperf %",
 ]
-DISPLAY_COLS_TAIL = ["PE", "Market Cap (Cr)"]
+DISPLAY_COLS_TAIL = ["PE", "Free Float %", "Market Cap (Cr)"]
 
 STYLE_COLS = {
     "Weekly %":            colour_pct,
@@ -103,12 +115,14 @@ STYLE_COLS = {
     "RSI":                 colour_rsi,
     "RS Rating":           colour_rs,
     "RMV":                 colour_rmv,
+    "Free Float %":        colour_float,
     "Sentiment":           colour_sentiment,
 }
 
 NUM_FORMAT = {
     "CMP":                 "{:.2f}",
     "PE":                  "{:.2f}",
+    "Free Float %":        "{:.1f}",
     "RSI":                 "{:.2f}",
     "RMV":                 "{:.1f}",
     "RS Rating":           "{:.0f}",

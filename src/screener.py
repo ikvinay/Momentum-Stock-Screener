@@ -235,6 +235,8 @@ def _process_stock(
         ema10_touch_sc=ema10_touch_sc,
     )
 
+    free_float_pct = info.get("free_float_pct")
+
     return {
         "Symbol":              symbol,
         "Company":             company_name,
@@ -242,6 +244,7 @@ def _process_stock(
         "Industry":            industry,
         "CMP":                 round(current_price, 2),
         "PE":                  pe,
+        "Free Float %":        free_float_pct,
         "RSI":                 rsi,
         "RMV":                 round(rmv, 1) if not np.isnan(rmv) else None,
         "Weekly %":            weekly_pct,
