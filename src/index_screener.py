@@ -23,6 +23,7 @@ from config import (
 from src.indicators import (
     calculate_rsi, calculate_rmv,
     detect_vcp, detect_inside_day,
+    calculate_rs_raw_score,
 )
 from src.sector_mapper import index_return
 
@@ -174,6 +175,18 @@ def _score_rs_trend(close: pd.Series, nifty500: pd.Series) -> float:
 # Category lookup
 # ---------------------------------------------------------------------------
 
+def _normalize_rs_ratings(raw_scores: Dict[str, float]) -> Dict[str, int]:
+    if not raw_scores:
+        return {}
+    s = pd.Series(raw_scores)
+    n = len(s)
+    if n == 1:
+        return {s.index[0]: 50}
+    ranks = s.rank(method="average", ascending=True)
+    ratings = (1.0 + 98.0 * (ranks - 1.0) / (n - 1.0)).round(0).clip(1, 99).astype(int)
+    return ratings.to_dict()
+
+
 def _index_category(name: str) -> str:
     for cat, entries in NSE_INDEX_TICKERS.items():
         if name in entries:
@@ -220,6 +233,16 @@ def run_index_screener(
         n500_close = nifty500_df["Close"] if "Close" in nifty500_df.columns else nifty500_df.iloc[:, 0]
         n500_close.index = pd.to_datetime(n500_close.index)
         n500_ret_1m = index_return(nifty500_df, MONTHLY_DAYS)
+
+    # Pre-compute RS raw scores across ALL indices so the 1-99 rating reflects
+    # the full universe, not just those that pass the EMA stack filter.
+    rs_raw: Dict[str, float] = {}
+    for name, df in index_ohlcv.items():
+        try:
+            rs_raw[name] = calculate_rs_raw_score(df, nifty500_df)
+        except Exception:
+            pass
+    rs_ratings = _normalize_rs_ratings(rs_raw)
 
     weights = INDEX_SCORE_WEIGHTS
     rows = []
@@ -284,26 +307,27 @@ def run_index_screener(
             )
 
             rows.append({
-                "Index":        name,
-                "Category":     _index_category(name),
-                "Ticker":       _index_ticker(name),
-                "CMP":          round(cmp, 2),
-                "52W High":     round(high_52w, 2),
-                "52W Low":      round(low_52w, 2),
-                "% from High":  round((cmp / high_52w - 1) * 100, 2) if high_52w else 0.0,
-                "Weekly %":     round(ret_1w, 2),
-                "Monthly %":    round(ret_1m, 2),
-                "Quarterly %":  round(ret_3m, 2),
+                "Index":          name,
+                "Category":       _index_category(name),
+                "Ticker":         _index_ticker(name),
+                "CMP":            round(cmp, 2),
+                "52W High":       round(high_52w, 2),
+                "52W Low":        round(low_52w, 2),
+                "% from High":    round((cmp / high_52w - 1) * 100, 2) if high_52w else 0.0,
+                "Weekly %":       round(ret_1w, 2),
+                "Monthly %":      round(ret_1m, 2),
+                "Quarterly %":    round(ret_3m, 2),
                 "vs Nifty500 1M": round(ret_1m - n500_ret_1m, 2),
-                "EMA10":        round(ema10, 2),
-                "EMA20":        round(ema20, 2),
-                "EMA50":        round(ema50, 2),
-                "RSI":          round(rsi_val, 1),
-                "RMV":          round(rmv_val, 1),
-                "VCP":          vcp,
-                "Inside Day":   inside_day,
-                "RS Trend":     bool(rs_trend_score > 0),
-                "Score":        round(score, 2),
+                "RS Rating":      int(rs_ratings.get(name, 50)),
+                "EMA10":          round(ema10, 2),
+                "EMA20":          round(ema20, 2),
+                "EMA50":          round(ema50, 2),
+                "RSI":            round(rsi_val, 1),
+                "RMV":            round(rmv_val, 1),
+                "VCP":            vcp,
+                "Inside Day":     inside_day,
+                "RS Trend":       bool(rs_trend_score > 0),
+                "Score":          round(score, 2),
             })
 
         except Exception as exc:

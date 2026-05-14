@@ -251,3 +251,59 @@ IPO_VOL_PICKUP_RATIO = 1.0  # Recent vol ≥ historical vol (accumulation signal
 # Cache file for IPO screener results
 IPO_RESULTS_FILE    = os.path.join(DATA_DIR, "ipo_results.pkl")
 IPO_IB_RESULTS_FILE = os.path.join(DATA_DIR, "ipo_ib_results.pkl")
+
+# ---------------------------------------------------------------------------
+# MCX Commodities — tracked separately in the Commodities tab
+# ---------------------------------------------------------------------------
+
+# Yahoo Finance proxy tickers for MCX futures contracts.
+# Prices are international (COMEX / NYMEX / LME) but highly correlated with
+# MCX; LME tickers (^LMNI*, ^LMPB*, ^LMZS*) are silently skipped if unavailable.
+MCX_COMMODITY_TICKERS: dict[str, str] = {
+    "Gold Mini":         "GC=F",          # COMEX Gold
+    "Silver Mini":       "SI=F",          # COMEX Silver
+    "Aluminium Mini":    "ALI=F",         # COMEX Aluminium
+    "Copper":            "HG=F",          # COMEX Copper
+    "Nickel Mini":       "^LMNIBS03",     # LME Nickel 3-month
+    "Lead Mini":         "^LMPBBS03",     # LME Lead 3-month
+    "Zinc Mini":         "^LMZSBS03",     # LME Zinc 3-month
+    "Crude Mini":        "CL=F",          # NYMEX WTI Crude Oil
+    "Natural Gas Mini":  "NG=F",          # NYMEX Natural Gas
+}
+
+# Category grouping for display
+MCX_COMMODITY_CATEGORY: dict[str, str] = {
+    "Gold Mini":        "Precious Metals",
+    "Silver Mini":      "Precious Metals",
+    "Aluminium Mini":   "Base Metals",
+    "Copper":           "Base Metals",
+    "Nickel Mini":      "Base Metals",
+    "Lead Mini":        "Base Metals",
+    "Zinc Mini":        "Base Metals",
+    "Crude Mini":       "Energy",
+    "Natural Gas Mini": "Energy",
+}
+
+# RS benchmarks for commodities
+COMMODITY_NIFTY500_TICKERS  = ["^CRSLDX", "^NSEI"]   # General RS benchmark
+COMMODITY_METAL_TICKERS     = ["^CNXMETAL"]           # Sectoral RS benchmark
+
+# Composite score weights for commodities (must sum to 100)
+COMMODITY_SCORE_WEIGHTS: dict[str, int] = {
+    "52w_high_proximity":  20,   # Proximity to 52-week high
+    "nifty500_outperf":    20,   # 1M outperf vs Nifty 500
+    "metal_index_outperf": 20,   # 1M outperf vs Nifty Metal Index
+    "rsi_score":           15,   # RSI normalised 55→80 band
+    "close_to_kma":         5,   # Proximity within ±1.5% of 10 EMA
+    "rmv_score":            5,   # Lower RMV = higher score
+    "rs_trend":            15,   # RS line EMA10 > EMA20 → uptrend
+}
+
+# Cache files for commodity screener
+COMMODITY_OHLCV_FILE      = os.path.join(DATA_DIR, "commodity_ohlcv.pkl")
+COMMODITY_RESULTS_FILE    = os.path.join(DATA_DIR, "commodity_results.pkl")
+COMMODITY_SNAPSHOTS_FILE  = os.path.join(DATA_DIR, "commodity_snapshots.pkl")
+
+# Scheduler: commodity refresh at 23:45 IST (after MCX closes at 23:30)
+COMMODITY_REFRESH_HOUR_IST   = 23
+COMMODITY_REFRESH_MINUTE_IST = 45

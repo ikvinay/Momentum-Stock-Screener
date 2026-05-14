@@ -35,10 +35,10 @@ def colour_rsi(val) -> str:
 def colour_rs(val) -> str:
     if val is None or (isinstance(val, float) and pd.isna(val)):
         return ""
-    if val >= 80:
+    if val > 85:
         return "color: #22c55e; font-weight: bold"
-    if val >= 50:
-        return "color: #f59e0b"
+    if val > 70:
+        return "color: #f59e0b; font-weight: bold"
     return "color: #ef4444"
 
 

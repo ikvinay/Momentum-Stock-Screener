@@ -12,7 +12,11 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 import pytz
-from config import REFRESH_HOUR_IST, REFRESH_MINUTE_IST, IST_TIMEZONE
+from config import (
+    REFRESH_HOUR_IST, REFRESH_MINUTE_IST,
+    COMMODITY_REFRESH_HOUR_IST, COMMODITY_REFRESH_MINUTE_IST,
+    IST_TIMEZONE,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -30,25 +34,37 @@ def start_scheduler() -> None:
         if _scheduler is not None:
             return
 
-        from src.pipeline import run_full_pipeline
+        from src.pipeline import run_full_pipeline, run_commodity_pipeline
         IST = pytz.timezone(IST_TIMEZONE)
         _scheduler = BackgroundScheduler(timezone=IST)
+
+        # Stocks + Indices: daily at 16:00 IST
         _scheduler.add_job(
             func=lambda: run_full_pipeline("scheduler"),
-            trigger=CronTrigger(
-                hour=REFRESH_HOUR_IST,
-                minute=REFRESH_MINUTE_IST,
-                timezone=IST,
-            ),
+            trigger=CronTrigger(hour=REFRESH_HOUR_IST, minute=REFRESH_MINUTE_IST, timezone=IST),
             id="daily_refresh",
-            name=f"Daily refresh at {REFRESH_HOUR_IST:02d}:{REFRESH_MINUTE_IST:02d} IST",
+            name=f"Stocks/Indices refresh at {REFRESH_HOUR_IST:02d}:{REFRESH_MINUTE_IST:02d} IST",
             replace_existing=True,
         )
+
+        # Commodities: daily at 23:45 IST (after MCX closes at 23:30)
+        _scheduler.add_job(
+            func=lambda: run_commodity_pipeline("scheduler"),
+            trigger=CronTrigger(
+                hour=COMMODITY_REFRESH_HOUR_IST,
+                minute=COMMODITY_REFRESH_MINUTE_IST,
+                timezone=IST,
+            ),
+            id="commodity_refresh",
+            name=f"Commodity refresh at {COMMODITY_REFRESH_HOUR_IST:02d}:{COMMODITY_REFRESH_MINUTE_IST:02d} IST",
+            replace_existing=True,
+        )
+
         _scheduler.start()
         logger.info(
-            "Scheduler started — daily refresh at %02d:%02d IST",
-            REFRESH_HOUR_IST,
-            REFRESH_MINUTE_IST,
+            "Scheduler started — stocks/indices at %02d:%02d IST, commodities at %02d:%02d IST",
+            REFRESH_HOUR_IST, REFRESH_MINUTE_IST,
+            COMMODITY_REFRESH_HOUR_IST, COMMODITY_REFRESH_MINUTE_IST,
         )
 
 

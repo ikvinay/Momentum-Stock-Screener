@@ -21,6 +21,7 @@ import pandas as pd
 from config import (
     DATA_DIR, SCREENER_RESULTS_FILE, LAST_UPDATED_FILE, REFRESH_STATUS_FILE,
     IPO_RESULTS_FILE, IPO_IB_RESULTS_FILE, INDEX_RESULTS_FILE,
+    COMMODITY_RESULTS_FILE,
     MONTHLY_DAYS, QUARTERLY_DAYS,
 )
 
@@ -86,6 +87,17 @@ def load_ipo_ib_results() -> Optional[pd.DataFrame]:
         except Exception as exc:
             logger.warning("ipo_ib_results.pkl corrupted (%s) — re-run screener", exc)
             os.remove(IPO_IB_RESULTS_FILE)
+    return None
+
+
+def load_commodity_results() -> Optional[pd.DataFrame]:
+    if os.path.exists(COMMODITY_RESULTS_FILE):
+        try:
+            with open(COMMODITY_RESULTS_FILE, "rb") as f:
+                return pickle.load(f)
+        except Exception as exc:
+            logger.warning("commodity_results.pkl corrupted (%s) — re-run screener", exc)
+            os.remove(COMMODITY_RESULTS_FILE)
     return None
 
 
@@ -196,6 +208,12 @@ def run_data_fetch(triggered_by: str = "manual") -> None:
         save_index_ohlcv(index_ohlcv)
         logger.info("NSE index OHLCV saved: %d indices", len(index_ohlcv))
 
+        write_status("fetch", "running", "Fetching MCX commodity OHLCV data…")
+        from src.commodity_screener import fetch_commodity_ohlcv, save_commodity_ohlcv
+        commodity_ohlcv = fetch_commodity_ohlcv()
+        save_commodity_ohlcv(commodity_ohlcv)
+        logger.info("Commodity OHLCV saved: %d instruments", len(commodity_ohlcv))
+
         from datetime import datetime
         import pytz
         from config import IST_TIMEZONE
@@ -263,6 +281,16 @@ def run_screener_only(triggered_by: str = "manual") -> None:
             save_index_snapshot(index_results, force=True)
             logger.info("Index screener: %d indices passed", len(index_results))
 
+        write_status("screener", "running", "Running Commodity screener…")
+        from src.commodity_screener import load_commodity_ohlcv, run_commodity_screener, save_commodity_results
+        from src.commodity_tracker import save_commodity_snapshot
+        commodity_ohlcv = load_commodity_ohlcv()
+        if commodity_ohlcv:
+            commodity_results = run_commodity_screener(commodity_ohlcv, nifty500)
+            save_commodity_results(commodity_results)
+            save_commodity_snapshot(commodity_results, force=True)
+            logger.info("Commodity screener: %d passed", len(commodity_results))
+
         write_status(
             "screener", "done",
             f"{len(results)} stocks | {len(ipo_results)} IPO bases — {now_ist}",
@@ -278,6 +306,42 @@ def run_full_pipeline(triggered_by: str = "scheduler") -> None:
     """Chains fetch → screener. Called by the 4 PM APScheduler job."""
     run_data_fetch(triggered_by)
     run_screener_only(triggered_by)
+
+
+def run_commodity_pipeline(triggered_by: str = "scheduler") -> None:
+    """
+    Standalone commodity refresh — fetch OHLCV then run screener.
+    Called by the 23:45 IST APScheduler job and the sidebar button.
+    """
+    write_status("commodity", "running", f"Commodity fetch started ({triggered_by})")
+    try:
+        from src.commodity_screener import (
+            fetch_commodity_ohlcv, save_commodity_ohlcv,
+            run_commodity_screener, save_commodity_results,
+        )
+        from src.commodity_tracker import save_commodity_snapshot
+        from src.sector_mapper import load_index_data
+
+        write_status("commodity", "running", "Fetching MCX commodity OHLCV…")
+        commodity_ohlcv = fetch_commodity_ohlcv()
+        save_commodity_ohlcv(commodity_ohlcv)
+
+        write_status("commodity", "running", "Running commodity screener…")
+        _, _, nifty500 = load_index_data()
+        commodity_results = run_commodity_screener(commodity_ohlcv, nifty500)
+        save_commodity_results(commodity_results)
+        save_commodity_snapshot(commodity_results, force=True)
+
+        from datetime import datetime
+        import pytz
+        from config import IST_TIMEZONE
+        now_ist = datetime.now(pytz.timezone(IST_TIMEZONE)).strftime("%Y-%m-%d %H:%M:%S IST")
+        write_status("commodity", "done", f"{len(commodity_results)} commodities passing — {now_ist}")
+        logger.info("Commodity pipeline complete: %d passed", len(commodity_results))
+
+    except Exception as exc:
+        logger.exception("Commodity pipeline failed")
+        write_status("commodity", "error", str(exc))
 
 
 def run_sentiment_fetch(triggered_by: str = "manual") -> None:
