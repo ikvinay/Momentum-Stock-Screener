@@ -266,7 +266,13 @@ def run_screener_only(triggered_by: str = "manual") -> None:
 
         from src.nse_freefloat import load_freefloat_cache
         freefloat = load_freefloat_cache()
-        logger.info("Free float cache loaded: %d tickers", len(freefloat))
+        if freefloat:
+            logger.info("Free float cache loaded: %d tickers", len(freefloat))
+        else:
+            logger.warning(
+                "Free float cache is empty — data fetch may still be running. "
+                "Re-run the screener after the fetch completes to get Free Float %% values."
+            )
 
         write_status("screener", "running", f"Running main screener on {len(price_data)} stocks…")
         results = run_screener(price_data, stock_info, sector_indices, benchmark, freefloat)

@@ -71,14 +71,18 @@ def render_data_management() -> None:
         elif screen_st.get("state") == "error":
             st.error(f"❌ {screen_st['message']}")
 
-        has_data = os.path.exists(os.path.join(DATA_DIR, "price_data.pkl"))
+        has_data    = os.path.exists(os.path.join(DATA_DIR, "price_data.pkl"))
+        fetch_busy  = fetch_st.get("state") == "running"
+        screener_ok = has_data and not fetch_busy
         if st.button("🔍 Run Screener", use_container_width=True,
-                     disabled=not has_data,
+                     disabled=not screener_ok,
                      help="Applies all filters and pattern detection on cached price data. Runs in seconds."):
             st.toast("Screener started…")
             threading.Thread(target=run_screener_only, args=("manual",), daemon=True).start()
         if not has_data:
             st.caption("⚠ Fetch stock data first.")
+        elif fetch_busy:
+            st.caption("⏳ Waiting for data fetch to finish…")
 
         has_results = os.path.exists(SCREENER_RESULTS_FILE)
         if st.button("🧠 Fetch Sentiment", use_container_width=True,
