@@ -35,7 +35,15 @@ NSE_SH_URL = (
     "https://www.nseindia.com/api/corporate-share-holdings-master"
     "?index=equities&symbol={symbol}"
 )
-REQUEST_DELAY = 0.5   # seconds between NSE API calls
+REQUEST_DELAY      = 0.5   # seconds between NSE API calls
+SLOW_REQUEST_SECS  = 10    # warn if a single request takes longer than this
+CONSECUTIVE_WARN   = 10    # warn after this many consecutive NSE misses in a row
+
+
+def _fmt_dur(seconds: float) -> str:
+    """Format a duration as 'Xm Ys' for log readability."""
+    m, s = divmod(int(seconds), 60)
+    return f"{m}m {s:02d}s" if m else f"{s}s"
 
 
 # ---------------------------------------------------------------------------
@@ -123,37 +131,83 @@ def fetch_all_freefloat(
     """
     yf_info = yf_info or {}
     session = _build_session()
-    result: Dict[str, float] = {}
+    result:       Dict[str, float] = {}
+    nse_count     = 0   # resolved via NSE API
+    fallback_count = 0  # resolved via yfinance heldPercentInsiders
+    no_data_count  = 0  # neither source had data
+    consec_miss    = 0  # consecutive tickers with no NSE data
 
     total = len(yf_tickers)
+    if total == 0:
+        return result
+
+    est_min = total * REQUEST_DELAY / 60
+    logger.info(
+        "Free float fetch START — %d tickers, est. %.0f min (0.5 s/ticker)",
+        total, est_min,
+    )
+    t0 = time.time()
+
     for i, yf_ticker in enumerate(yf_tickers):
         nse_symbol = yf_ticker.replace(".NS", "")
-        ff = fetch_freefloat(nse_symbol, session)
 
-        if ff is None:
+        t_req  = time.time()
+        ff_nse = fetch_freefloat(nse_symbol, session)
+        req_secs = time.time() - t_req
+
+        if req_secs > SLOW_REQUEST_SECS:
+            logger.warning(
+                "Slow NSE response — %s took %.1f s (possible throttling)",
+                nse_symbol, req_secs,
+            )
+
+        if ff_nse is not None:
+            result[yf_ticker] = ff_nse
+            nse_count += 1
+            consec_miss = 0
+        else:
+            consec_miss += 1
+            if consec_miss == CONSECUTIVE_WARN:
+                logger.warning(
+                    "NSE API: %d consecutive tickers returned no data "
+                    "(last: %s) — API may be throttling or down",
+                    CONSECUTIVE_WARN, nse_symbol,
+                )
             # Fallback: derive from yfinance insider-held %
             info = yf_info.get(yf_ticker, {})
             held = info.get("heldPercentInsiders")
             if held is not None:
-                ff = round((1.0 - float(held)) * 100, 1)
+                result[yf_ticker] = round((1.0 - float(held)) * 100, 1)
+                fallback_count += 1
+            else:
+                no_data_count += 1
 
-        if ff is not None:
-            result[yf_ticker] = ff
-
-        # Progress log every 100 tickers so the user can see activity
-        if (i + 1) % 100 == 0 or (i + 1) == total:
+        # Progress log every 50 tickers
+        done = i + 1
+        if done % 50 == 0 or done == total:
+            elapsed   = time.time() - t0
+            rate      = done / elapsed  # tickers per second
+            remaining = (total - done) / rate if rate > 0 else 0
             logger.info(
-                "Free float fetch progress: %d/%d tickers (%.0f%%) — %d with data",
-                i + 1, total, (i + 1) / total * 100, len(result),
+                "Free float [%d/%d] %.0f%% | elapsed %s | ETA %s | "
+                "NSE=%d  fallback=%d  no-data=%d",
+                done, total, done / total * 100,
+                _fmt_dur(elapsed), _fmt_dur(remaining),
+                nse_count, fallback_count, no_data_count,
             )
 
         # Sleep between requests but not after the last one
         if i < total - 1:
             time.sleep(REQUEST_DELAY)
 
+    elapsed_total = time.time() - t0
+    coverage = len(result) / total * 100 if total else 0
     logger.info(
-        "Free float fetch complete: %d/%d tickers with data",
-        len(result), total,
+        "Free float fetch COMPLETE in %s — "
+        "%d/%d tickers covered (%.0f%%) | NSE=%d  fallback=%d  no-data=%d",
+        _fmt_dur(elapsed_total),
+        len(result), total, coverage,
+        nse_count, fallback_count, no_data_count,
     )
     return result
 
