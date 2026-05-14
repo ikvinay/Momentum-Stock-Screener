@@ -339,3 +339,12 @@ COMMODITY_SNAPSHOTS_FILE  = os.path.join(DATA_DIR, "commodity_snapshots.pkl")
 # Scheduler: commodity refresh at 23:45 IST (after MCX closes at 23:30)
 COMMODITY_REFRESH_HOUR_IST   = 23
 COMMODITY_REFRESH_MINUTE_IST = 45
+
+# ---------------------------------------------------------------------------
+# NSE Free Float cache
+# ---------------------------------------------------------------------------
+
+# Free float % sourced from NSE's official shareholding pattern API.
+# Refreshed quarterly (90 days) to match SEBI's quarterly filing cadence.
+FREEFLOAT_FILE       = os.path.join(DATA_DIR, "freefloat_cache.pkl")
+FREEFLOAT_CACHE_DAYS = 90

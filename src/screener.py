@@ -54,6 +54,7 @@ def run_screener(
     stock_info: Dict[str, dict],
     sector_indices: Dict[str, pd.DataFrame],
     benchmark: Optional[pd.DataFrame],
+    freefloat: Optional[Dict[str, float]] = None,
 ) -> pd.DataFrame:
     """
     Apply all filters and return a ranked DataFrame of passing stocks.
@@ -83,10 +84,12 @@ def run_screener(
             pass
     rs_ratings = _normalize_rs_ratings(rs_raw)
 
+    freefloat = freefloat or {}
     rows = []
     for ticker, raw_df in price_data.items():
         try:
-            result = _process_stock(ticker, raw_df, stock_info, sector_indices, benchmark_1m, benchmark_3m, benchmark)
+            ff_pct = freefloat.get(ticker)
+            result = _process_stock(ticker, raw_df, stock_info, sector_indices, benchmark_1m, benchmark_3m, benchmark, ff_pct)
             if result is not None:
                 result["RS Rating"] = int(rs_ratings.get(ticker, 50))
                 rows.append(result)
@@ -117,6 +120,7 @@ def _process_stock(
     benchmark_1m: float,
     benchmark_3m: float,
     benchmark_df: Optional[pd.DataFrame] = None,
+    free_float_pct: Optional[float] = None,
 ) -> Optional[dict]:
     """Return a result dict if the stock passes all filters, else None."""
     info = stock_info.get(ticker, {})
@@ -234,8 +238,6 @@ def _process_stock(
         rs_trend_sc=rs_trend_sc,
         ema10_touch_sc=ema10_touch_sc,
     )
-
-    free_float_pct = info.get("free_float_pct")
 
     return {
         "Symbol":              symbol,

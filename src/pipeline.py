@@ -23,6 +23,7 @@ from config import (
     IPO_RESULTS_FILE, IPO_IB_RESULTS_FILE, INDEX_RESULTS_FILE,
     COMMODITY_RESULTS_FILE,
     MONTHLY_DAYS, QUARTERLY_DAYS,
+    FREEFLOAT_FILE,
 )
 
 logger = logging.getLogger(__name__)
@@ -190,11 +191,23 @@ def run_data_fetch(triggered_by: str = "manual") -> None:
 
         if is_info_cache_fresh():
             write_status("fetch", "running", "Stock info cache is fresh — skipping download")
+            stock_info = load_stock_info() or {}
         else:
             write_status("fetch", "running", "Fetching PE / sector / market cap info…")
             stock_info = fetch_stock_info(list(price_data.keys()))
             save_stock_info(stock_info)
             logger.info("Stock info saved: %d tickers", len(stock_info))
+
+        from src.nse_freefloat import (
+            fetch_all_freefloat, save_freefloat_cache, is_freefloat_cache_fresh,
+        )
+        if is_freefloat_cache_fresh():
+            write_status("fetch", "running", "Free float cache is fresh — skipping download")
+        else:
+            write_status("fetch", "running", "Fetching free float % from NSE shareholding API…")
+            freefloat = fetch_all_freefloat(list(price_data.keys()), stock_info)
+            save_freefloat_cache(freefloat)
+            logger.info("Free float data saved: %d tickers", len(freefloat))
 
         write_status("fetch", "running", "Fetching benchmark, Nifty 500 and sector indices…")
         benchmark = fetch_benchmark()
@@ -245,8 +258,12 @@ def run_screener_only(triggered_by: str = "manual") -> None:
         stock_info = load_stock_info() or {}
         benchmark, sector_indices, nifty500 = load_index_data()
 
+        from src.nse_freefloat import load_freefloat_cache
+        freefloat = load_freefloat_cache()
+        logger.info("Free float cache loaded: %d tickers", len(freefloat))
+
         write_status("screener", "running", f"Running main screener on {len(price_data)} stocks…")
-        results = run_screener(price_data, stock_info, sector_indices, benchmark)
+        results = run_screener(price_data, stock_info, sector_indices, benchmark, freefloat)
 
         write_status("screener", "running", "Running IPO Base screener…")
         ipo_results = run_ipo_screener(price_data, stock_info, sector_indices, nifty500)
