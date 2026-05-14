@@ -125,6 +125,7 @@ def fetch_all_freefloat(
     session = _build_session()
     result: Dict[str, float] = {}
 
+    total = len(yf_tickers)
     for i, yf_ticker in enumerate(yf_tickers):
         nse_symbol = yf_ticker.replace(".NS", "")
         ff = fetch_freefloat(nse_symbol, session)
@@ -139,13 +140,20 @@ def fetch_all_freefloat(
         if ff is not None:
             result[yf_ticker] = ff
 
+        # Progress log every 100 tickers so the user can see activity
+        if (i + 1) % 100 == 0 or (i + 1) == total:
+            logger.info(
+                "Free float fetch progress: %d/%d tickers (%.0f%%) — %d with data",
+                i + 1, total, (i + 1) / total * 100, len(result),
+            )
+
         # Sleep between requests but not after the last one
-        if i < len(yf_tickers) - 1:
+        if i < total - 1:
             time.sleep(REQUEST_DELAY)
 
     logger.info(
         "Free float fetch complete: %d/%d tickers with data",
-        len(result), len(yf_tickers),
+        len(result), total,
     )
     return result
 

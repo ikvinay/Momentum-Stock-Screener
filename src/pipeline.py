@@ -202,9 +202,15 @@ def run_data_fetch(triggered_by: str = "manual") -> None:
             fetch_all_freefloat, save_freefloat_cache, is_freefloat_cache_fresh,
         )
         if is_freefloat_cache_fresh():
-            write_status("fetch", "running", "Free float cache is fresh — skipping download")
+            write_status("fetch", "running", "Free float cache is fresh (quarterly) — skipping")
         else:
-            write_status("fetch", "running", "Fetching free float % from NSE shareholding API…")
+            n_tickers = len(price_data)
+            est_min = round(n_tickers * 0.5 / 60)
+            write_status(
+                "fetch", "running",
+                f"Fetching free float % from NSE API for {n_tickers} stocks "
+                f"(~{est_min} min, runs once per quarter)…",
+            )
             freefloat = fetch_all_freefloat(list(price_data.keys()), stock_info)
             save_freefloat_cache(freefloat)
             logger.info("Free float data saved: %d tickers", len(freefloat))
