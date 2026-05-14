@@ -205,8 +205,40 @@ NSE_INDEX_TICKERS: dict[str, dict[str, str]] = {
         "Nifty Services Sector":             "^CNXSERVICE",
         "Nifty Transportation & Logistics":  "^NIFTRL",
         "Nifty SME Emerge":                  "^NIFSMEEMERGE",
+        "Nifty Healthcare Index":            "^CNXPHARMA",
     },
 }
+
+# Thematic indices fetched via nselib (NSE India) — not reliably available on yfinance.
+# These supplement NSE_INDEX_TICKERS and are fetched separately in fetch_thematic_index_ohlcv().
+NSE_THEMATIC_INDICES: list[str] = [
+    "Nifty Capital Markets",
+    "Nifty Commodities",
+    "Nifty Core Housing",
+    "Nifty CPSE",
+    "Nifty Energy",
+    "Nifty EV & New Age Automotive",
+    "Nifty Housing",
+    "Nifty India Consumption",
+    "Nifty India Defence",
+    "Nifty India Digital",
+    "Nifty India Infrastructure & Logistics",
+    "Nifty India Internet",
+    "Nifty India Manufacturing",
+    "Nifty India New Age Consumption",
+    "Nifty India Railways PSU",
+    "Nifty India Tourism",
+    "Nifty Infrastructure",
+    "Nifty IPO",
+    "Nifty MNC",
+    "Nifty Mobility",
+    "Nifty PSE",
+    "Nifty REITs & InvITs",
+    "Nifty Services Sector",
+    "Nifty Transportation & Logistics",
+    "Nifty SME Emerge",
+    "Nifty Healthcare Index",
+]
 
 # Cache files for index screener
 INDEX_OHLCV_FILE      = os.path.join(DATA_DIR, "index_ohlcv.pkl")

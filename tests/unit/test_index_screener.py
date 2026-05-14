@@ -14,6 +14,8 @@ from src.index_screener import (
     _score_rmv,
     _score_kma,
     _score_rs_trend,
+    _normalise_nselib_df,
+    _index_category,
     run_index_screener,
 )
 
@@ -167,3 +169,114 @@ class TestRunIndexScreener:
         if len(result) > 1:
             scores = result["Score"].tolist()
             assert scores == sorted(scores, reverse=True)
+
+    def test_rs_rating_column_present_and_in_range(self):
+        ohlcv = self._make_ohlcv_dict(n_indices=5)
+        result = run_index_screener(ohlcv)
+        if not result.empty:
+            assert "RS Rating" in result.columns
+            assert result["RS Rating"].between(1, 99).all()
+
+
+# ---------------------------------------------------------------------------
+# _normalise_nselib_df
+# ---------------------------------------------------------------------------
+
+def _make_nselib_raw(n: int = 30, bad_dates: bool = False) -> pd.DataFrame:
+    """Simulate the raw DataFrame returned by nselib.capital_market.index_data()."""
+    import numpy as np
+    rng = np.random.default_rng(42)
+    dates = pd.date_range("2025-01-01", periods=n, freq="B")
+    # NSE timestamp format: "DD-MON-YYYY"
+    timestamps = [d.strftime("%d-%b-%Y").upper() for d in dates]
+    if bad_dates:
+        timestamps = ["INVALID"] * n
+    close = 1000.0 * np.cumprod(1 + rng.normal(0.001, 0.005, n))
+    return pd.DataFrame({
+        "INDEX_NAME":       ["NIFTY IND DIGITAL"] * n,
+        "OPEN_INDEX_VAL":   close * rng.uniform(0.995, 1.005, n),
+        "HIGH_INDEX_VAL":   close * rng.uniform(1.001, 1.015, n),
+        "LOW_INDEX_VAL":    close * rng.uniform(0.985, 0.999, n),
+        "CLOSE_INDEX_VAL":  close,
+        "TURN_OVER":        rng.uniform(1000, 50000, n),
+        "TRADED_QTY":       rng.integers(1_000_000, 5_000_000, n).astype(float),
+        "TIMESTAMP":        timestamps,
+    })
+
+
+class TestNormaliseNselibDf:
+    def test_returns_dataframe_with_ohlcv(self):
+        raw = _make_nselib_raw(n=30)
+        df = _normalise_nselib_df(raw)
+        assert df is not None
+        assert isinstance(df, pd.DataFrame)
+        for col in ("Open", "High", "Low", "Close"):
+            assert col in df.columns
+
+    def test_index_is_datetimeindex(self):
+        raw = _make_nselib_raw(n=30)
+        df = _normalise_nselib_df(raw)
+        assert isinstance(df.index, pd.DatetimeIndex)
+
+    def test_volume_mapped(self):
+        raw = _make_nselib_raw(n=30)
+        df = _normalise_nselib_df(raw)
+        assert "Volume" in df.columns
+
+    def test_sorted_ascending_by_date(self):
+        raw = _make_nselib_raw(n=30)
+        df = _normalise_nselib_df(raw)
+        assert df.index.is_monotonic_increasing
+
+    def test_none_on_empty_input(self):
+        assert _normalise_nselib_df(pd.DataFrame()) is None
+
+    def test_none_on_missing_close(self):
+        raw = _make_nselib_raw(n=30).drop(columns=["CLOSE_INDEX_VAL"])
+        assert _normalise_nselib_df(raw) is None
+
+    def test_none_when_fewer_than_20_rows(self):
+        raw = _make_nselib_raw(n=10)
+        assert _normalise_nselib_df(raw) is None
+
+    def test_invalid_dates_dropped(self):
+        raw = _make_nselib_raw(n=30, bad_dates=True)
+        result = _normalise_nselib_df(raw)
+        # All dates are invalid → no rows → should return None
+        assert result is None
+
+    def test_values_are_numeric(self):
+        raw = _make_nselib_raw(n=30)
+        df = _normalise_nselib_df(raw)
+        for col in ("Open", "High", "Low", "Close"):
+            assert pd.api.types.is_numeric_dtype(df[col])
+
+    def test_non_ohlc_columns_dropped(self):
+        raw = _make_nselib_raw(n=30)
+        df = _normalise_nselib_df(raw)
+        assert "INDEX_NAME" not in df.columns
+        assert "TURN_OVER"  not in df.columns
+
+
+# ---------------------------------------------------------------------------
+# _index_category
+# ---------------------------------------------------------------------------
+
+class TestIndexCategory:
+    def test_broad_market_index(self):
+        assert _index_category("Nifty 50") == "Broad Market"
+
+    def test_sectoral_index(self):
+        assert _index_category("Nifty Bank") == "Sectoral"
+
+    def test_thematic_index_from_nselib(self):
+        assert _index_category("Nifty India Digital") == "Thematic"
+
+    def test_unknown_index_returns_other(self):
+        assert _index_category("Some Unknown Index") == "Other"
+
+    def test_all_nse_thematic_indices_classified(self):
+        from config import NSE_THEMATIC_INDICES
+        for name in NSE_THEMATIC_INDICES:
+            cat = _index_category(name)
+            assert cat == "Thematic", f"{name!r} got category {cat!r}"

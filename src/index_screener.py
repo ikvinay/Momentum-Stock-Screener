@@ -7,7 +7,8 @@ Relative Strength is measured against Nifty 500 (^CRSLDX / ^NSEI fallback).
 
 import logging
 import pickle
-from datetime import datetime
+import time
+from datetime import datetime, timedelta
 from typing import Dict, Optional
 
 import numpy as np
@@ -16,7 +17,7 @@ import yfinance as yf
 
 from config import (
     DATA_DIR, INDEX_OHLCV_FILE, INDEX_RESULTS_FILE,
-    NSE_INDEX_TICKERS, INDEX_SCORE_WEIGHTS,
+    NSE_INDEX_TICKERS, NSE_THEMATIC_INDICES, INDEX_SCORE_WEIGHTS,
     MONTHLY_DAYS, QUARTERLY_DAYS, WEEKLY_DAYS,
     KMA_BAND_PCT, RMV_LOOKBACK, RMV_TIGHT_THRESHOLD,
 )
@@ -83,7 +84,112 @@ def fetch_index_ohlcv(period: str = "1y", interval: str = "1d") -> Dict[str, pd.
         except Exception as exc:
             logger.debug("Skipping %s (%s): %s", name, ticker, exc)
 
-    logger.info("Loaded %d/%d NSE indices successfully", len(result), len(all_tickers))
+    logger.info("Loaded %d/%d NSE indices from yfinance", len(result), len(all_tickers))
+
+    # Merge thematic indices fetched from NSE India via nselib.
+    # nselib results take precedence for any name collision.
+    thematic = fetch_thematic_index_ohlcv()
+    result.update(thematic)
+    logger.info(
+        "Total index OHLCV loaded: %d (%d thematic via nselib)", len(result), len(thematic)
+    )
+    return result
+
+
+def _normalise_nselib_df(df: pd.DataFrame) -> Optional[pd.DataFrame]:
+    """
+    Convert nselib index_data() output to a standard DatetimeIndex OHLCV DataFrame.
+
+    nselib returns columns: INDEX_NAME, OPEN_INDEX_VAL, HIGH_INDEX_VAL,
+    CLOSE_INDEX_VAL, LOW_INDEX_VAL, TURN_OVER, TRADED_QTY, TIMESTAMP
+    with TIMESTAMP in "DD-MON-YYYY" format (e.g. "13-MAY-2026").
+    """
+    if df is None or df.empty:
+        return None
+    df = df.copy()
+
+    # Locate and parse the date column
+    date_col = next(
+        (c for c in df.columns if any(k in c.lower() for k in ("date", "timestamp"))),
+        None,
+    )
+    if date_col:
+        # Try NSE format DD-MON-YYYY first, then fall back to generic parsing
+        parsed = pd.to_datetime(df[date_col], format="%d-%b-%Y", errors="coerce")
+        if parsed.isna().all():
+            parsed = pd.to_datetime(df[date_col], dayfirst=True, errors="coerce")
+        df[date_col] = parsed
+        df = df.dropna(subset=[date_col]).set_index(date_col)
+        df.index.name = None
+
+    # Map column names to standard OHLCV names (keyword-based, handles any nselib version)
+    col_map: Dict[str, str] = {}
+    for c in df.columns:
+        cl = c.lower().strip()
+        if "open" in cl:
+            col_map[c] = "Open"
+        elif "high" in cl:
+            col_map[c] = "High"
+        elif "low" in cl:
+            col_map[c] = "Low"
+        elif "close" in cl or "last" in cl:
+            col_map[c] = "Close"
+        elif "traded_qty" in cl or "traded qty" in cl:
+            col_map[c] = "Volume"
+    df = df.rename(columns=col_map)
+
+    needed = [c for c in ("Open", "High", "Low", "Close") if c in df.columns]
+    if "Close" not in needed:
+        return None
+
+    keep = needed + (["Volume"] if "Volume" in df.columns else [])
+    df = df[keep].apply(pd.to_numeric, errors="coerce").dropna(subset=["Close"])
+    df = df.sort_index()
+    df.index = pd.to_datetime(df.index)
+    return df if len(df) >= 20 else None
+
+
+def fetch_thematic_index_ohlcv() -> Dict[str, pd.DataFrame]:
+    """
+    Fetch 1-year daily OHLCV for NSE_THEMATIC_INDICES using nselib.
+    Falls back gracefully to an empty dict if nselib is not installed or NSE
+    is unreachable.  A 1-second pause between requests prevents rate-limiting.
+    """
+    try:
+        from nselib import capital_market  # noqa: PLC0415
+    except ImportError:
+        logger.warning(
+            "nselib not installed — thematic indices skipped. Run: pip install nselib"
+        )
+        return {}
+
+    to_dt   = datetime.today()
+    from_dt = to_dt - timedelta(days=370)  # slight buffer beyond 1 year
+    from_str = from_dt.strftime("%d-%m-%Y")
+    to_str   = to_dt.strftime("%d-%m-%Y")
+
+    result: Dict[str, pd.DataFrame] = {}
+    for name in NSE_THEMATIC_INDICES:
+        try:
+            raw = capital_market.index_data(
+                index=name,
+                from_date=from_str,
+                to_date=to_str,
+            )
+            df = _normalise_nselib_df(raw)
+            if df is not None:
+                result[name] = df
+                logger.debug("Thematic index loaded — %s: %d rows", name, len(df))
+            else:
+                logger.debug("Thematic index %s — insufficient data after normalisation", name)
+        except Exception as exc:
+            logger.warning("Skipping thematic index '%s': %s", name, exc)
+        time.sleep(1)
+
+    logger.info(
+        "Thematic index fetch complete: %d/%d loaded",
+        len(result), len(NSE_THEMATIC_INDICES),
+    )
     return result
 
 
@@ -188,6 +294,9 @@ def _normalize_rs_ratings(raw_scores: Dict[str, float]) -> Dict[str, int]:
 
 
 def _index_category(name: str) -> str:
+    # Thematic indices (fetched via nselib) take priority over yfinance ticker dict
+    if name in NSE_THEMATIC_INDICES:
+        return "Thematic"
     for cat, entries in NSE_INDEX_TICKERS.items():
         if name in entries:
             return cat
