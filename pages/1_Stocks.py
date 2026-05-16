@@ -37,6 +37,7 @@ min_score       = filters["min_score"]
 min_rs          = filters["min_rs"]
 rsi_range       = filters["rsi_range"]
 max_rmv         = filters["max_rmv"]
+min_float       = filters["min_float"]
 cap_min         = filters["cap_min"]
 cap_max         = filters["cap_max"]
 
@@ -155,6 +156,8 @@ with tab_screen:
             df = df[(df["Market Cap (Cr)"] >= cap_min) & (df["Market Cap (Cr)"] <= cap_max)]
         if "RSI" in df.columns:
             df = df[df["RSI"].isna() | ((df["RSI"] >= rsi_range[0]) & (df["RSI"] <= rsi_range[1]))]
+        if "Free Float %" in df.columns and min_float > 0:
+            df = df[df["Free Float %"].notna() & (df["Free Float %"] >= min_float)]
 
         if df.empty:
             st.info("No stocks match the current filters.")

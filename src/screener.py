@@ -40,7 +40,9 @@ def _normalize_rs_ratings(raw_scores: Dict[str, float]) -> Dict[str, int]:
     """
     if not raw_scores:
         return {}
-    s = pd.Series(raw_scores)
+    s = pd.Series(raw_scores).dropna()
+    if s.empty:
+        return {}
     n = len(s)
     if n == 1:
         return {s.index[0]: 50}

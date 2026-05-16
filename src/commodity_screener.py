@@ -135,7 +135,9 @@ def _fetch_series(tickers: list[str]) -> Optional[pd.DataFrame]:
 def _normalize_rs_ratings(raw_scores: Dict[str, float]) -> Dict[str, int]:
     if not raw_scores:
         return {}
-    s = pd.Series(raw_scores)
+    s = pd.Series(raw_scores).dropna()
+    if s.empty:
+        return {}
     n = len(s)
     if n == 1:
         return {s.index[0]: 50}
@@ -241,10 +243,14 @@ def run_commodity_screener(
 
     # Pre-compute RS raw scores across ALL commodities so 1-99 rating reflects
     # the full universe, not just those that pass the EMA stack filter.
+    # No benchmark is passed (None) so the score is pure absolute price momentum
+    # (IBD Method 2 only).  Passing Nifty 500 (INR equity index) as the benchmark
+    # contaminates commodity RS with equity bull/bear cycle — when Nifty is up 25%,
+    # every commodity looks weak vs equities and RS Ratings cluster near 1.
     rs_raw: Dict[str, float] = {}
     for name, df in commodity_ohlcv.items():
         try:
-            rs_raw[name] = calculate_rs_raw_score(df, nifty500_df)
+            rs_raw[name] = calculate_rs_raw_score(df, None)
         except Exception:
             pass
     rs_ratings = _normalize_rs_ratings(rs_raw)

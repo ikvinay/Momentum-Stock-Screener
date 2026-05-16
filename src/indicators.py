@@ -513,13 +513,13 @@ def calculate_rs_raw_score(
             return min(pct, 100.0)
         return max(-100.0 / max(abs(pct), 0.01), -100.0)
 
-    close = stock_df["Close"]
+    close = stock_df["Close"].dropna()
     if len(close) < WINDOWS[0][0]:
         return 0.0
 
     idx_close: Optional[pd.Series] = None
     if index_df is not None and not index_df.empty and len(index_df) >= WINDOWS[0][0]:
-        idx_close = index_df["Close"]
+        idx_close = index_df["Close"].dropna()
 
     m2_total, m2_w = 0.0, 0.0
     m3_total, m3_w = 0.0, 0.0

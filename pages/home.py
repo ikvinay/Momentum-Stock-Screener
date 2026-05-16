@@ -45,5 +45,5 @@ with col3:
         st.markdown("### Commodities")
         st.write("MCX Gold, Silver, Crude, Agri · Coming soon")
         st.metric("Passing today", "—")
-        if st.button("Preview →", key="tile_commodities", use_container_width=True):
+        if st.button("View Commodities →", key="tile_commodities", use_container_width=True):
             st.switch_page("pages/3_Commodities.py")

@@ -15,6 +15,7 @@ import pytz
 from config import (
     REFRESH_HOUR_IST, REFRESH_MINUTE_IST,
     COMMODITY_REFRESH_HOUR_IST, COMMODITY_REFRESH_MINUTE_IST,
+    FREEFLOAT_REFRESH_DAY, FREEFLOAT_REFRESH_HOUR_IST, FREEFLOAT_REFRESH_MINUTE_IST,
     IST_TIMEZONE,
 )
 
@@ -34,7 +35,7 @@ def start_scheduler() -> None:
         if _scheduler is not None:
             return
 
-        from src.pipeline import run_full_pipeline, run_commodity_pipeline
+        from src.pipeline import run_full_pipeline, run_commodity_pipeline, run_freefloat_refresh
         IST = pytz.timezone(IST_TIMEZONE)
         _scheduler = BackgroundScheduler(timezone=IST)
 
@@ -60,11 +61,31 @@ def start_scheduler() -> None:
             replace_existing=True,
         )
 
+        # Free float: full refresh once a week on Saturday at 10:00 IST
+        _scheduler.add_job(
+            func=lambda: run_freefloat_refresh("scheduler"),
+            trigger=CronTrigger(
+                day_of_week=FREEFLOAT_REFRESH_DAY,
+                hour=FREEFLOAT_REFRESH_HOUR_IST,
+                minute=FREEFLOAT_REFRESH_MINUTE_IST,
+                timezone=IST,
+            ),
+            id="weekly_freefloat_refresh",
+            name=(
+                f"Free float full refresh "
+                f"({FREEFLOAT_REFRESH_DAY} {FREEFLOAT_REFRESH_HOUR_IST:02d}:{FREEFLOAT_REFRESH_MINUTE_IST:02d} IST)"
+            ),
+            replace_existing=True,
+        )
+
         _scheduler.start()
         logger.info(
-            "Scheduler started — stocks/indices at %02d:%02d IST, commodities at %02d:%02d IST",
+            "Scheduler started — stocks/indices at %02d:%02d IST, "
+            "commodities at %02d:%02d IST, "
+            "free float full refresh: %s at %02d:%02d IST",
             REFRESH_HOUR_IST, REFRESH_MINUTE_IST,
             COMMODITY_REFRESH_HOUR_IST, COMMODITY_REFRESH_MINUTE_IST,
+            FREEFLOAT_REFRESH_DAY, FREEFLOAT_REFRESH_HOUR_IST, FREEFLOAT_REFRESH_MINUTE_IST,
         )
 
 

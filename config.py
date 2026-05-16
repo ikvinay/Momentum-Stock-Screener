@@ -345,6 +345,17 @@ COMMODITY_REFRESH_MINUTE_IST = 45
 # ---------------------------------------------------------------------------
 
 # Free float % sourced from NSE's official shareholding pattern API.
-# Refreshed quarterly (90 days) to match SEBI's quarterly filing cadence.
+# Daily stock fetch: only missing tickers are fetched (incremental).
+# Full refresh: runs automatically once a week on the configured day.
 FREEFLOAT_FILE       = os.path.join(DATA_DIR, "freefloat_cache.pkl")
-FREEFLOAT_CACHE_DAYS = 90
+FREEFLOAT_CACHE_DAYS = 7   # kept for reference; weekly job ignores this and always refreshes
+
+# Weekly full-refresh schedule (APScheduler CronTrigger values, IST timezone)
+# "sat" = Saturday; change to "sun" for Sunday.
+FREEFLOAT_REFRESH_DAY        = "sat"
+FREEFLOAT_REFRESH_HOUR_IST   = 10
+FREEFLOAT_REFRESH_MINUTE_IST = 0
+
+# Number of parallel fetch threads.  3 is conservative and safe for the NSE API;
+# raise to 5 if you want a further speedup and don't observe throttling.
+FREEFLOAT_MAX_WORKERS = 3

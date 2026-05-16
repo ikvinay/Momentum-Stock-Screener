@@ -49,8 +49,9 @@ def read_status() -> dict:
         except Exception:
             pass
     return {
-        "fetch":    {"state": "idle", "message": ""},
-        "screener": {"state": "idle", "message": ""},
+        "fetch":     {"state": "idle", "message": ""},
+        "screener":  {"state": "idle", "message": ""},
+        "freefloat": {"state": "idle", "message": ""},
     }
 
 
@@ -198,22 +199,32 @@ def run_data_fetch(triggered_by: str = "manual") -> None:
             save_stock_info(stock_info)
             logger.info("Stock info saved: %d tickers", len(stock_info))
 
-        from src.nse_freefloat import (
-            fetch_all_freefloat, save_freefloat_cache, is_freefloat_cache_fresh,
-        )
-        if is_freefloat_cache_fresh():
-            write_status("fetch", "running", "Free float cache is fresh (quarterly) — skipping")
-        else:
-            n_tickers = len(price_data)
-            est_min = round(n_tickers * 0.5 / 60)
+        from src.nse_freefloat import fetch_all_freefloat, save_freefloat_cache, load_freefloat_cache
+        existing_ff  = load_freefloat_cache()
+        all_tickers  = list(price_data.keys())
+        missing_ff   = [t for t in all_tickers if t not in existing_ff]
+        if missing_ff:
+            n_missing = len(missing_ff)
+            n_cached  = len(existing_ff)
+            est_min   = round(n_missing * 0.5 / 60)
             write_status(
                 "fetch", "running",
-                f"Fetching free float % from NSE API for {n_tickers} stocks "
-                f"(~{est_min} min, runs once per quarter)…",
+                f"Fetching free float % for {n_missing} new stocks "
+                f"({n_cached} already cached; ~{est_min} min)…",
             )
-            freefloat = fetch_all_freefloat(list(price_data.keys()), stock_info)
-            save_freefloat_cache(freefloat)
-            logger.info("Free float data saved: %d tickers", len(freefloat))
+            new_ff = fetch_all_freefloat(missing_ff, stock_info)
+            existing_ff.update(new_ff)
+            save_freefloat_cache(existing_ff)
+            logger.info(
+                "Free float cache updated: %d total (%d new, %d pre-existing)",
+                len(existing_ff), len(new_ff), n_cached,
+            )
+        else:
+            write_status("fetch", "running", "Free float cache complete — all stocks covered, skipping fetch")
+            logger.info(
+                "Free float cache complete — %d/%d tickers cached, no fetch needed",
+                len(existing_ff), len(all_tickers),
+            )
 
         write_status("fetch", "running", "Fetching benchmark, Nifty 500 and sector indices…")
         benchmark = fetch_benchmark()
@@ -303,22 +314,32 @@ def run_screener_only(triggered_by: str = "manual") -> None:
         logger.info("Stock snapshot: %d stocks", n_snap)
 
         write_status("screener", "running", "Running NSE Index screener…")
-        index_ohlcv = load_index_ohlcv()
-        if index_ohlcv:
-            index_results = run_index_screener(index_ohlcv, nifty500)
-            save_index_results(index_results)
-            save_index_snapshot(index_results, force=True)
-            logger.info("Index screener: %d indices passed", len(index_results))
+        try:
+            index_ohlcv = load_index_ohlcv()
+            if index_ohlcv:
+                index_results = run_index_screener(index_ohlcv, nifty500)
+                save_index_results(index_results)
+                save_index_snapshot(index_results, force=True)
+                logger.info("Index screener: %d indices passed", len(index_results))
+            else:
+                logger.warning("No index OHLCV data cached — run Fetch Data first to populate index tracker")
+        except Exception as exc:
+            logger.exception("Index screener failed (screener will continue): %s", exc)
 
         write_status("screener", "running", "Running Commodity screener…")
-        from src.commodity_screener import load_commodity_ohlcv, run_commodity_screener, save_commodity_results
-        from src.commodity_tracker import save_commodity_snapshot
-        commodity_ohlcv = load_commodity_ohlcv()
-        if commodity_ohlcv:
-            commodity_results = run_commodity_screener(commodity_ohlcv, nifty500)
-            save_commodity_results(commodity_results)
-            save_commodity_snapshot(commodity_results, force=True)
-            logger.info("Commodity screener: %d passed", len(commodity_results))
+        try:
+            from src.commodity_screener import load_commodity_ohlcv, run_commodity_screener, save_commodity_results
+            from src.commodity_tracker import save_commodity_snapshot
+            commodity_ohlcv = load_commodity_ohlcv()
+            if commodity_ohlcv:
+                commodity_results = run_commodity_screener(commodity_ohlcv, nifty500)
+                save_commodity_results(commodity_results)
+                save_commodity_snapshot(commodity_results, force=True)
+                logger.info("Commodity screener: %d passed", len(commodity_results))
+            else:
+                logger.warning("No commodity OHLCV data cached — run Fetch Commodities to populate tracker")
+        except Exception as exc:
+            logger.exception("Commodity screener failed (screener will continue): %s", exc)
 
         write_status(
             "screener", "done",
@@ -371,6 +392,48 @@ def run_commodity_pipeline(triggered_by: str = "scheduler") -> None:
     except Exception as exc:
         logger.exception("Commodity pipeline failed")
         write_status("commodity", "error", str(exc))
+
+
+def run_freefloat_refresh(triggered_by: str = "scheduler") -> None:
+    """
+    Full weekly refresh of free float data — re-fetches every ticker and overwrites
+    the cache.  Called by the Saturday APScheduler job and the sidebar manual button.
+    """
+    write_status("freefloat", "running", f"Free float full refresh started ({triggered_by})")
+    try:
+        from src.data_fetcher import load_price_data, load_stock_info
+        from src.nse_freefloat import fetch_all_freefloat, save_freefloat_cache
+
+        price_data = load_price_data()
+        if not price_data:
+            write_status("freefloat", "error", "No price data — run Fetch Data first")
+            return
+
+        stock_info = load_stock_info() or {}
+        tickers    = list(price_data.keys())
+        n_tickers  = len(tickers)
+        est_min    = round(n_tickers * 0.5 / 60)
+
+        write_status(
+            "freefloat", "running",
+            f"Refreshing free float % for all {n_tickers} stocks (~{est_min} min)…",
+        )
+        freefloat = fetch_all_freefloat(tickers, stock_info)
+        save_freefloat_cache(freefloat)
+
+        from datetime import datetime
+        import pytz
+        from config import IST_TIMEZONE
+        now_ist = datetime.now(pytz.timezone(IST_TIMEZONE)).strftime("%Y-%m-%d %H:%M:%S IST")
+        write_status(
+            "freefloat", "done",
+            f"{len(freefloat)}/{n_tickers} tickers covered — {now_ist}",
+        )
+        logger.info("Free float full refresh complete: %d/%d tickers", len(freefloat), n_tickers)
+
+    except Exception as exc:
+        logger.exception("Free float refresh failed")
+        write_status("freefloat", "error", str(exc))
 
 
 def run_sentiment_fetch(triggered_by: str = "manual") -> None:

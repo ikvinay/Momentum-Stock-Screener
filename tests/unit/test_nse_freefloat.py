@@ -163,21 +163,22 @@ class TestFetchAllFreefloat:
             result = fetch_all_freefloat([])
         assert result == {}
 
-    def test_sleep_called_between_requests_not_after_last(self):
-        """Rate-limiting sleep must fire N-1 times for N tickers."""
+    def test_sleep_called_after_every_request(self):
+        """Each worker sleeps once per request — N tickers → N sleeps total."""
         tickers = ["A.NS", "B.NS", "C.NS"]
         with patch("src.nse_freefloat._build_session") as mock_build, \
              patch("src.nse_freefloat.time.sleep") as mock_sleep:
             mock_build.return_value = _make_session(json_data=NSE_RELIANCE_PAYLOAD)
             fetch_all_freefloat(tickers)
-        assert mock_sleep.call_count == len(tickers) - 1
+        assert mock_sleep.call_count == len(tickers)
 
-    def test_single_ticker_no_sleep(self):
+    def test_single_ticker_sleeps_once(self):
+        """Even a single ticker sleeps after its request (uniform per-thread delay)."""
         with patch("src.nse_freefloat._build_session") as mock_build, \
              patch("src.nse_freefloat.time.sleep") as mock_sleep:
             mock_build.return_value = _make_session(json_data=NSE_RELIANCE_PAYLOAD)
             fetch_all_freefloat(["RELIANCE.NS"])
-        assert mock_sleep.call_count == 0
+        assert mock_sleep.call_count == 1
 
     def test_partial_failures_do_not_abort_remaining_tickers(self):
         """A 404 for one ticker must not stop the rest from being fetched."""
