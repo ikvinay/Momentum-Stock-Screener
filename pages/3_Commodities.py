@@ -6,7 +6,7 @@ import streamlit as st
 import pandas as pd
 
 from ui.components import inject_css, tick, colour_pct, colour_rsi, colour_rmv, colour_rs, colour_score
-from ui.sidebar import render_data_management, render_commodity_filters
+from ui.sidebar import render_commodity_filters
 from src.pipeline import load_commodity_results, last_updated
 
 inject_css()
@@ -20,32 +20,29 @@ commodity_results = load_commodity_results()
 # Sidebar
 # ---------------------------------------------------------------------------
 with st.sidebar:
-    render_data_management()
     if commodity_results is not None and not commodity_results.empty:
-        st.divider()
         _cats = commodity_results["Category"].unique().tolist()
         _com_filters = render_commodity_filters(categories=_cats)
 
 # ---------------------------------------------------------------------------
 # Header
 # ---------------------------------------------------------------------------
-col_title, col_meta = st.columns([5, 2])
-with col_title:
-    st.markdown("# 🏗️ MCX Commodities — Momentum Ranking")
-    st.caption(
-        "Hard filter: EMA10 > EMA20 > EMA50  ·  "
-        "RS vs Nifty 500 + Nifty Metal Index  ·  "
-        "Auto-refresh 23:45 IST"
-    )
-with col_meta:
-    last = last_updated()
-    st.markdown(
-        f"<div style='text-align:right;padding-top:14px'>"
-        f"<span style='color:#6b7280;font-size:0.8rem'>LAST UPDATED</span><br>"
-        f"<span style='color:#d1d5db;font-size:0.88rem;font-weight:600'>{last}</span>"
-        f"</div>",
-        unsafe_allow_html=True,
-    )
+_last = last_updated()
+st.markdown(
+    f'<div style="display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:6px">'
+    f'<div>'
+    f'<div style="font-size:22px;font-weight:700;color:#f1f5f9;letter-spacing:-0.02em">'
+    f'<i class="ti ti-gem" style="color:#6366f1;margin-right:8px"></i>MCX Commodities — Momentum Ranking</div>'
+    f'<div style="font-size:12px;color:#64748b;margin-top:4px;line-height:1.6">'
+    f'Hard filter: EMA10 &rsaquo; EMA20 &rsaquo; EMA50  ·  RS vs Nifty 500 + Metal Index  ·  Auto-refresh 23:45 IST</div>'
+    f'</div>'
+    f'<div style="text-align:right;flex-shrink:0;padding-left:16px">'
+    f'<div style="font-size:0.68rem;color:#64748b;font-weight:700;letter-spacing:0.07em;text-transform:uppercase">Last Updated</div>'
+    f'<div style="font-size:0.88rem;color:#d1d5db;font-weight:600;margin-top:3px">{_last}</div>'
+    f'</div>'
+    f'</div>',
+    unsafe_allow_html=True,
+)
 st.divider()
 
 if commodity_results is None or commodity_results.empty:
@@ -59,7 +56,7 @@ if commodity_results is None or commodity_results.empty:
 # ---------------------------------------------------------------------------
 # Tabs
 # ---------------------------------------------------------------------------
-tab_rank, tab_track = st.tabs(["  🏗️  Rankings  ", "  📈  Performance Tracker  "])
+tab_rank, tab_track = st.tabs(["  Rankings  ", "  Performance Tracker  "])
 
 # ── Tab 1 — Rankings ─────────────────────────────────────────────────────────
 with tab_rank:

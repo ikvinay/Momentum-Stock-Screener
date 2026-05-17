@@ -1,11 +1,10 @@
 """
 Shared sidebar renderer.
 
-Call render_data_management() from every page to show the data pipeline
-controls (Fetch / Run Screener / Fetch Sentiment buttons + status).
-
-Call render_stock_filters() only from the Stocks page to get pattern
-checkboxes, score/RS/RSI/RMV/cap sliders. Returns a dict of filter values.
+render_data_management() — Admin page only. Shows data pipeline controls.
+render_stock_filters()   — Stocks page sidebar filters.
+render_index_filters()   — Themes page sidebar filters.
+render_commodity_filters() — Commodities page sidebar filters.
 """
 
 import os
@@ -20,8 +19,39 @@ from src.pipeline import (
 )
 
 
+def _sidebar_section(label: str) -> None:
+    """Render a small uppercase section label for the sidebar."""
+    st.markdown(
+        f'<div style="font-size:10px;font-weight:700;letter-spacing:.1em;'
+        f'text-transform:uppercase;color:#334155;margin:14px 4px 6px;">{label}</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def _status_badge(state: str, message: str) -> None:
+    """Compact inline status line for running / error states."""
+    if state == "running":
+        st.markdown(
+            f'<div style="font-size:11.5px;color:#f59e0b;padding:4px 0 2px;">'
+            f'<i class="ti ti-loader-2"></i> {message}</div>',
+            unsafe_allow_html=True,
+        )
+    elif state == "error":
+        st.markdown(
+            f'<div style="font-size:11.5px;color:#ef4444;padding:4px 0 2px;">'
+            f'<i class="ti ti-circle-x"></i> {message}</div>',
+            unsafe_allow_html=True,
+        )
+    elif state == "done":
+        st.markdown(
+            f'<div style="font-size:11px;color:#22c55e;padding:2px 0;">'
+            f'<i class="ti ti-circle-check"></i> {message}</div>',
+            unsafe_allow_html=True,
+        )
+
+
 def render_data_management() -> None:
-    """Render Admin Controls with separate Stocks and Commodities sections."""
+    """Render the sidebar brand header + data pipeline controls."""
     from src.data_fetcher import is_price_data_fresh, price_data_last_fetched
     from src.sector_mapper import is_index_data_fresh
 
@@ -29,96 +59,82 @@ def render_data_management() -> None:
     age        = price_data_last_fetched()
     dot_color  = "#22c55e" if data_fresh else "#f59e0b"
 
-    status        = read_status()
-    fetch_st      = status.get("fetch",     {})
-    screen_st     = status.get("screener",  {})
-    commodity_st  = status.get("commodity", {})
-    freefloat_st  = status.get("freefloat", {})
+    status       = read_status()
+    fetch_st     = status.get("fetch",     {})
+    screen_st    = status.get("screener",  {})
+    commodity_st = status.get("commodity", {})
+    freefloat_st = status.get("freefloat", {})
 
-    with st.expander("⚙️ Admin Controls", expanded=False):
+    # ── Data Controls (collapsible) ───────────────────────────────────────────
+    with st.expander("Data Controls", expanded=False):
 
-        # ── Stocks ────────────────────────────────────────────────────────────
-        with st.container(border=True):
-            st.markdown("**📊 Stocks**")
-            if fetch_st.get("state") == "running":
-                st.info(fetch_st["message"], icon="⏳")
-            elif fetch_st.get("state") == "error":
-                st.error(f"❌ {fetch_st['message']}")
+        # Stocks
+        _sidebar_section("Stocks & Indices")
+        _status_badge(fetch_st.get("state", ""), fetch_st.get("message", ""))
+        fetch_label = "Refresh Stock Data ✓" if data_fresh else "Refresh Stock Data"
+        if st.button(fetch_label, use_container_width=True,
+                     help="Downloads price data, stock info and index data. 10–30 min on first run."):
+            st.toast("Stock data fetch started in background…")
+            threading.Thread(target=run_data_fetch, args=("manual",), daemon=True).start()
+        st.markdown(
+            f'<div style="font-size:11px;color:{dot_color};margin-top:3px;">● {age}</div>',
+            unsafe_allow_html=True,
+        )
 
-            fetch_label = "📥 Refresh Stock Data  ✓" if data_fresh else "📥 Refresh Stock Data"
-            if st.button(fetch_label, use_container_width=True,
-                         help="Downloads price data, stock info and index data. 10–30 min on first run."):
-                st.toast("Stock data fetch started in background…")
-                threading.Thread(target=run_data_fetch, args=("manual",), daemon=True).start()
-            st.markdown(f"<small style='color:{dot_color}'>● {age}</small>", unsafe_allow_html=True)
+        # Free Float
+        st.markdown(
+            '<hr style="border:none;border-top:1px solid rgba(255,255,255,0.06);margin:10px 0 4px;"/>',
+            unsafe_allow_html=True,
+        )
+        _sidebar_section("Free Float %")
+        _status_badge(freefloat_st.get("state", ""), freefloat_st.get("message", ""))
+        ff_busy = freefloat_st.get("state") == "running"
+        if st.button("Refresh Free Float Data", use_container_width=True, disabled=ff_busy,
+                     help="Full re-fetch of NSE shareholding % (~8 min). Auto-runs every Saturday 10:00 IST."):
+            st.toast("Free float full refresh started in background…")
+            threading.Thread(target=run_freefloat_refresh, args=("manual",), daemon=True).start()
 
-            st.divider()
-            st.markdown("**🔢 Free Float %**")
-            if freefloat_st.get("state") == "running":
-                st.info(freefloat_st["message"], icon="⏳")
-            elif freefloat_st.get("state") == "error":
-                st.error(f"❌ {freefloat_st['message']}")
-            elif freefloat_st.get("state") == "done":
-                st.caption(f"✓ {freefloat_st.get('message', '')}")
+        # Commodities
+        st.markdown(
+            '<hr style="border:none;border-top:1px solid rgba(255,255,255,0.06);margin:10px 0 4px;"/>',
+            unsafe_allow_html=True,
+        )
+        _sidebar_section("Commodities")
+        _status_badge(commodity_st.get("state", ""), commodity_st.get("message", ""))
+        if st.button("Refresh Commodities Data", use_container_width=True,
+                     help="Fetches MCX commodity OHLCV and re-runs screener. Auto-runs at 23:45 IST."):
+            st.toast("Commodity refresh started in background…")
+            threading.Thread(target=run_commodity_pipeline, args=("manual",), daemon=True).start()
 
-            ff_busy = freefloat_st.get("state") == "running"
-            if st.button(
-                "🔢 Refresh Free Float Data",
-                use_container_width=True,
-                disabled=ff_busy,
-                help=(
-                    "Full re-fetch of NSE shareholding % for all stocks (~8 min). "
-                    "Runs automatically every Saturday at 10:00 IST. "
-                    "Daily fetch only fills missing entries."
-                ),
-            ):
-                st.toast("Free float full refresh started in background…")
-                threading.Thread(target=run_freefloat_refresh, args=("manual",), daemon=True).start()
-
-        # ── Commodities ───────────────────────────────────────────────────────
-        with st.container(border=True):
-            st.markdown("**🏗️ Commodities**")
-            if commodity_st.get("state") == "running":
-                st.info(commodity_st["message"], icon="⏳")
-            elif commodity_st.get("state") == "error":
-                st.error(f"❌ {commodity_st['message']}")
-            elif commodity_st.get("state") == "done":
-                st.caption(f"✓ {commodity_st.get('message', '')}")
-
-            if st.button("🏗️ Refresh Commodities Data", use_container_width=True,
-                         help="Fetches MCX commodity OHLCV and re-runs screener. Auto-runs at 23:45 IST."):
-                st.toast("Commodity refresh started in background…")
-                threading.Thread(target=run_commodity_pipeline, args=("manual",), daemon=True).start()
-
-        # ── Application Tasks ─────────────────────────────────────────────────
-        st.divider()
-        st.markdown("**Application Tasks**")
-        if screen_st.get("state") == "running":
-            st.info(screen_st["message"], icon="⏳")
-        elif screen_st.get("state") == "error":
-            st.error(f"❌ {screen_st['message']}")
-
-        has_data    = os.path.exists(os.path.join(DATA_DIR, "price_data.pkl"))
-        fetch_busy  = fetch_st.get("state") == "running"
-        screener_ok = has_data and not fetch_busy
-        if st.button("🔍 Run Screener", use_container_width=True,
-                     disabled=not screener_ok,
+        # Run Screener
+        st.markdown(
+            '<hr style="border:none;border-top:1px solid rgba(255,255,255,0.06);margin:10px 0 4px;"/>',
+            unsafe_allow_html=True,
+        )
+        _sidebar_section("Screener")
+        _status_badge(screen_st.get("state", ""), screen_st.get("message", ""))
+        has_data   = os.path.exists(os.path.join(DATA_DIR, "price_data.pkl"))
+        fetch_busy = fetch_st.get("state") == "running"
+        if st.button("Run Screener", use_container_width=True,
+                     disabled=not (has_data and not fetch_busy),
                      help="Applies all filters and pattern detection on cached price data. Runs in seconds."):
             st.toast("Screener started…")
             threading.Thread(target=run_screener_only, args=("manual",), daemon=True).start()
         if not has_data:
-            st.caption("⚠ Fetch stock data first.")
+            st.markdown('<div style="font-size:11px;color:#64748b;margin-top:3px;">Fetch stock data first.</div>',
+                        unsafe_allow_html=True)
         elif fetch_busy:
-            st.caption("⏳ Waiting for data fetch to finish…")
+            st.markdown('<div style="font-size:11px;color:#64748b;margin-top:3px;">Waiting for fetch to finish…</div>',
+                        unsafe_allow_html=True)
 
         has_results = os.path.exists(SCREENER_RESULTS_FILE)
-        if st.button("🧠 Fetch Sentiment", use_container_width=True,
-                     disabled=not has_results,
+        if st.button("Fetch Sentiment", use_container_width=True, disabled=not has_results,
                      help="Pulls news + Reddit sentiment for screener stocks. ~2 min."):
             st.toast("Sentiment fetch started in background…")
             threading.Thread(target=run_sentiment_fetch, args=("manual",), daemon=True).start()
         if not has_results:
-            st.caption("⚠ Run screener first.")
+            st.markdown('<div style="font-size:11px;color:#64748b;margin-top:3px;">Run screener first.</div>',
+                        unsafe_allow_html=True)
 
 
 def render_stock_filters() -> dict:
@@ -137,9 +153,14 @@ def render_stock_filters() -> dict:
         if v >= 1_000:    return f"₹{v//1_000}K Cr"
         return f"₹{v} Cr"
 
-    with st.expander("🔍 Filter Controls", expanded=True):
-        pattern_filters = {pat: st.checkbox(pat) for pat in PATTERN_COLS}
-        st.write("")
+    with st.expander("Filters", expanded=False):
+        pattern_opts = st.multiselect(
+            "Patterns",
+            options=PATTERN_COLS,
+            default=[],
+            key="stk_patterns",
+            placeholder="Any pattern",
+        )
 
         min_score = st.slider("Min Score",     0,  100, 50, step=5)
         min_rs    = st.slider("Min RS Rating", 1,   99, 75)
@@ -166,7 +187,7 @@ def render_stock_filters() -> dict:
         )
         cap_min, cap_max = cap_range
 
-    with st.expander("📋 Screener Criteria", expanded=False):
+    with st.expander("Screener Criteria", expanded=False):
         st.markdown("""
 **Hard filters**
 - Market Cap > ₹2,000 Cr
@@ -185,8 +206,8 @@ def render_stock_filters() -> dict:
         """)
 
     return {
-        "pattern_filters": pattern_filters,
-        "min_score":        min_score,
+        "pattern_opts": pattern_opts,
+        "min_score":    min_score,
         "min_rs":           min_rs,
         "rsi_range":        rsi_range,
         "max_rmv":          max_rmv,
@@ -204,7 +225,7 @@ def render_index_filters(categories: list | None = None) -> dict:
     """
     cats = ["All"] + sorted(categories or [])
 
-    with st.expander("🔍 Filter Controls", expanded=True):
+    with st.expander("Filters", expanded=False):
         cat_filter  = st.selectbox("Category", cats, key="idx_cat")
         min_score   = st.slider("Min Score",     0,  100,  0, step=5, key="idx_score")
         min_rs      = st.slider("Min RS Rating", 1,   99,  1,         key="idx_rs")
@@ -232,7 +253,7 @@ def render_commodity_filters(categories: list | None = None) -> dict:
     """
     cats = ["All"] + sorted(categories or [])
 
-    with st.expander("🔍 Filter Controls", expanded=True):
+    with st.expander("Filters", expanded=False):
         cat_filter   = st.selectbox("Category", cats,          key="com_cat")
         min_score    = st.slider("Min Score",     0,  100,  0, step=5, key="com_score")
         min_rs       = st.slider("Min RS Rating", 1,   99,  1,         key="com_rs")

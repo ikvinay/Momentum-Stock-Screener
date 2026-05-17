@@ -27,6 +27,8 @@ from src.indicators import (
     detect_inside_day, tight_range_vol_score,
     kma_proximity_score, calculate_rmv, calculate_rs_raw_score,
     ema10_recent_touch, calculate_rs_trend,
+    detect_symmetrical_triangle,
+    detect_ascending_triangle,
 )
 from src.sector_mapper import resolve_sector_index, index_return
 
@@ -183,6 +185,8 @@ def _process_stock(
     near_ema_flag = near_10ema_flag(latest)
     near_ema_sc = near_10ema_score(latest)
     inside_day = detect_inside_day(df)
+    sym_triangle = detect_symmetrical_triangle(df)["detected"]
+    asc_triangle = detect_ascending_triangle(df)["detected"]
     trv_score  = tight_range_vol_score(df)
     kma_score  = kma_proximity_score(latest)
     rmv        = calculate_rmv(df)
@@ -259,6 +263,8 @@ def _process_stock(
         "Vol Contraction":     vol_contraction,
         "Near 10 EMA":         near_ema_flag,
         "Inside Day":          inside_day,
+        "Sym Triangle":        sym_triangle,
+        "Asc Triangle":        asc_triangle,
         "52W High":            round(high_52w, 2),
         "52W Low":             round(low_52w, 2),
         "% from 52W High":     pct_from_52h,

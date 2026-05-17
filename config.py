@@ -5,7 +5,7 @@ DATA_DIR = os.path.join(BASE_DIR, "data")
 
 # NSE equity list source
 EQUITY_LIST_URL = "https://nsearchives.nseindia.com/content/equities/EQUITY_L.csv"
-EQUITY_LIST_CACHE_DAYS = 7   # Re-fetch after 7 days
+EQUITY_LIST_CACHE_DAYS = 7
 
 # Cache file paths
 NIFTY1000_FILE = os.path.join(DATA_DIR, "nse_equity_list.csv")
@@ -28,7 +28,7 @@ EMA_PERIODS = [10, 20, 50, 200]
 
 # Hard filters
 MIN_MARKET_CAP_CR = 2000
-PRICE_MIN_PCT_OF_52W_HIGH = 0.76   # Price must be > 52W High × 0.76 (within 24% of high)
+PRICE_MIN_PCT_OF_52W_HIGH = 0.76
 MIN_HISTORY_DAYS = 200
 
 # RSI
@@ -37,21 +37,27 @@ RSI_PERIOD = 14
 # Performance lookback
 WEEKLY_DAYS = 5
 MONTHLY_DAYS = 21
-QUARTERLY_DAYS = 63   # ~3 months (21 × 3)
+QUARTERLY_DAYS = 63
 
 # VCP detection
-VCP_RUNUP_LOOKBACK = 40       # Days before consolidation to check for run-up
-VCP_RUNUP_MIN_PCT = 0.15      # Minimum 15% prior run-up
-VCP_CONSOL_WEEKS = 3          # Number of consolidation weeks to check
+VCP_RUNUP_LOOKBACK = 40
+VCP_RUNUP_MIN_PCT = 0.3
+VCP_CONSOL_WEEKS = 4
+VCP_CONTRACTION_TOLERANCE = 0.15
+VCP_VOL_DRY_UP_RATIO = 0.65
+VCP_MAX_BASE_DEPTH_PCT = 0.12
 
 # Volume contraction
-VOL_SHORT_PERIOD = 5          # Recent volume window (days)
-VOL_LONG_PERIOD = 20          # Historical volume window (days)
-VOL_CONTRACTION_RATIO = 0.80  # Recent vol must be < 80% of historical vol
+VOL_SHORT_PERIOD = 5
+VOL_LONG_PERIOD = 20
+VOL_EXTENDED_PERIOD = 50
+VOL_CONTRACTION_RATIO = 0.8
+VOL_PRICE_STABILITY_PCT = 0.03
+VOL_DISTRIB_DAY_PCT = 0.01
 
 # Near 10 EMA band
-EMA10_UPPER_PCT = 0.015       # +1.5%
-EMA10_LOWER_PCT = -0.025      # -2.5%
+EMA10_UPPER_PCT = 0.015
+EMA10_LOWER_PCT = -0.025
 
 # Scheduler: 4:00 PM IST daily
 REFRESH_HOUR_IST = 16
@@ -62,41 +68,41 @@ IST_TIMEZONE = "Asia/Kolkata"
 BATCH_SIZE = 50
 BATCH_DELAY_SECONDS = 3
 INFO_MAX_WORKERS = 10
-STOCK_INFO_CACHE_DAYS = 7     # Re-fetch stock info after 7 days
+STOCK_INFO_CACHE_DAYS = 7
 NIFTY1000_CACHE_DAYS = EQUITY_LIST_CACHE_DAYS
 
 # RSI hard filter — stocks below this threshold are excluded before scoring
 RSI_MIN_SCORE = 50
 
 # EMA10 extension hard filter — stocks more than this % above 10 EMA are excluded
-EMA10_MAX_EXTENSION_PCT = 0.06   # 6% above EMA10
+EMA10_MAX_EXTENSION_PCT = 0.06
 
 
 # Composite score weights (must sum to 100)
 SCORE_WEIGHTS = {
-    "52w_high_proximity": 20,
-    "benchmark_outperf":  15,
-    "sector_outperf":     15,
-    "tight_range_vol":     0,
-    "close_to_kma":        5,   # Proximity gradient within ±1.5% of 10 EMA
-    "rsi_score":          15,   # RSI normalised from 55→80 band
-    "rmv_score":           5,   # Lower RMV = higher score
-    "rs_trend":           25,   # RS line EMA10 > EMA20 → uptrend
-    "ema10_touch":         0,   # Superseded by EMA10_MAX_EXTENSION_PCT hard filter
+    "52w_high_proximity": 0,
+    "benchmark_outperf" : 25,
+    "sector_outperf"    : 25,
+    "tight_range_vol"   : 10,
+    "close_to_kma"      : 10,
+    "rsi_score"         : 5,
+    "rmv_score"         : 0,
+    "rs_trend"          : 20,
+    "ema10_touch"       : 5,
 }
 
 # Close to KMA (Key Moving Average = 10 EMA) scoring band
-KMA_BAND_PCT = 0.015   # ±1.5% around 10 EMA; score = 1.0 at EMA, 0.0 at boundary
+KMA_BAND_PCT = 0.015
 
 # Relative Measured Volatility (RMV)
-RMV_LOOKBACK         = 15   # Number of prior bars used for min/max normalization
-RMV_TIGHT_THRESHOLD  = 15   # RMV < this → flagged as unusually compressed / tight bar
+RMV_LOOKBACK         = 15
+RMV_TIGHT_THRESHOLD  = 15
 
 # Combined rank weights — how Momentum Score and RS Rating are blended for final rank
 # Must sum to 100.
 COMBINED_RANK_WEIGHTS = {
-    "score":     40,   # Momentum Score (0–100)
-    "rs_rating": 60,   # RS Rating (1–99)
+    "score"    : 40,
+    "rs_rating": 60,
 }
 
 # NSE sector index tickers (yfinance) keyed by lowercase fragment of sector name
@@ -251,13 +257,40 @@ INDEX_EMA_STACK_FILTER = True
 # Composite score weights for indices (must sum to 100).
 # No sector outperformance — those 15 pts are added to nifty500_outperf.
 INDEX_SCORE_WEIGHTS = {
-    "52w_high_proximity": 20,
-    "nifty500_outperf":   30,   # 1-month outperformance vs Nifty 500
-    "close_to_kma":        5,   # Proximity gradient within ±1.5% of 10 EMA
-    "rsi_score":          15,   # RSI normalised 55→80 band
-    "rmv_score":           5,   # Lower RMV = higher score
-    "rs_trend":           25,   # RS line EMA10 > EMA20 → uptrend
+    "52w_high_proximity": 10,
+    "nifty500_outperf"  : 30,
+    "close_to_kma"      : 5,
+    "rsi_score"         : 15,
+    "rmv_score"         : 5,
+    "rs_trend"          : 35,
 }
+
+# Symmetrical Triangle pattern
+SYMTRI_LOOKBACK = 90
+SYMTRI_MIN_TOUCHES = 3
+SYMTRI_SWING_WINDOW = 3
+SYMTRI_MIN_BARS_TO_APEX = 5
+SYMTRI_MIN_SPAN_BARS = 15          # Minimum bars between first and last pivot (pattern must develop)
+SYMTRI_MIN_START_WIDTH_PCT = 0.03  # Minimum starting width as % of price (filters noise in tight ranges)
+SYMTRI_R2_THRESHOLD = 0.85
+SYMTRI_SLOPE_SYMMETRY_MIN = 0.5
+SYMTRI_SLOPE_SYMMETRY_MAX = 2.0
+SYMTRI_REQUIRE_VOL_CONTRACTION = True
+
+# Ascending Triangle pattern
+ASCTRI_LOOKBACK = 90               # Lookback window in bars (covers ideal 40–90-bar formation)
+ASCTRI_MIN_TOUCHES_RESIST = 2      # Minimum flat-top resistance touches
+ASCTRI_MIN_TOUCHES_SUPPORT = 2     # Minimum rising-bottom support touches
+ASCTRI_SWING_WINDOW = 3            # Bars each side a pivot must dominate
+ASCTRI_MIN_SPAN_BARS = 25          # Minimum pivot span (< 25 bars = noise)
+ASCTRI_MAX_SPAN_BARS = 150         # Maximum pivot span
+ASCTRI_RESIST_MAX_SLOPE_PCT = 0.001   # Resistance |slope| < 0.1% of price per bar (near-flat)
+ASCTRI_SUPPORT_MIN_SLOPE_PCT = 0.0003 # Rising support slope > 0.03% of price per bar
+ASCTRI_SUPPORT_R2 = 0.65           # Minimum R² for support trendline fit
+ASCTRI_VOL_END_RATIO = 0.70        # Volume in final 10 bars < 70% of first 10 bars
+ASCTRI_RSI_MIN = 45                # RSI lower bound during formation
+ASCTRI_RSI_MAX = 70                # RSI upper bound during formation
+ASCTRI_REQUIRE_ABOVE_200DMA = True # Pattern must form above the 200-day EMA
 
 # Pattern columns produced by the screener (boolean).
 # Adding a new pattern: implement detect_X() in indicators.py, call it in
@@ -269,16 +302,18 @@ PATTERN_COLS = [
     "Vol Contraction",
     "Near 10 EMA",
     "Inside Day",
+    "Sym Triangle",
+    "Asc Triangle",
 ]
 
 # IPO Base pattern
-IPO_BASE_MAX_DAYS = 199     # Max trading days since listing to qualify
-IPO_BASE_MIN_DAYS = 20      # Min days needed to have formed a base
-IPO_BASE_SKIP_DAYS = 5      # Skip first N days (post-listing volatility)
-IPO_BASE_RANGE_MAX = 0.60   # Base High-Low range / Low must be ≤ this (60%)
-IPO_BREAKOUT_LOWER = -0.05  # Price can be up to 5% below base high
-IPO_BREAKOUT_UPPER = 0.10   # Price can be up to 10% above base high (still in play)
-IPO_VOL_PICKUP_RATIO = 1.0  # Recent vol ≥ historical vol (accumulation signal)
+IPO_BASE_MAX_DAYS = 199
+IPO_BASE_MIN_DAYS = 5
+IPO_BASE_SKIP_DAYS = 5
+IPO_BASE_RANGE_MAX = 0.6
+IPO_BREAKOUT_LOWER = -0.05
+IPO_BREAKOUT_UPPER = 0.1
+IPO_VOL_PICKUP_RATIO = 1.0
 
 # Cache file for IPO screener results
 IPO_RESULTS_FILE    = os.path.join(DATA_DIR, "ipo_results.pkl")
@@ -352,7 +387,7 @@ FREEFLOAT_CACHE_DAYS = 7   # kept for reference; weekly job ignores this and alw
 
 # Weekly full-refresh schedule (APScheduler CronTrigger values, IST timezone)
 # "sat" = Saturday; change to "sun" for Sunday.
-FREEFLOAT_REFRESH_DAY        = "sat"
+FREEFLOAT_REFRESH_DAY        = 'sat'
 FREEFLOAT_REFRESH_HOUR_IST   = 10
 FREEFLOAT_REFRESH_MINUTE_IST = 0
 

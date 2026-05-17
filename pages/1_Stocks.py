@@ -1,20 +1,21 @@
 """
-Stocks page — NSE Momentum Screener, IPO Setups, Performance Tracker.
+Stocks page — NSE Market Insights, IPO Setups, Performance Tracker.
 """
 
 import streamlit as st
 
 from ui.components import (
     inject_css, tick, colour_pct, colour_rsi, colour_rmv, colour_rs, colour_ret, colour_float,
-    render_stock_chart, render_top_stocks, render_ipo_section,
+    render_stock_chart, render_top_stocks, render_ipo_section, render_rrg_chart,
     DISPLAY_COLS_HEAD, DISPLAY_COLS_TAIL, STYLE_COLS, NUM_FORMAT,
     TRACKER_BASE_COLS, TRACKER_NUM_FORMAT,
 )
-from ui.sidebar import render_data_management, render_stock_filters
+from ui.sidebar import render_stock_filters
 from src.pipeline import (
     load_results, load_ipo_results, load_ipo_ib_results,
     last_updated, sector_outperformance_vs_nifty500, top_industries_vs_sector,
 )
+from src.data_fetcher import is_price_data_fresh, price_data_last_fetched
 from config import (
     PATTERN_COLS, COMBINED_RANK_WEIGHTS, MONTHLY_DAYS, QUARTERLY_DAYS,
     IPO_BASE_MAX_DAYS, RMV_TIGHT_THRESHOLD,
@@ -28,12 +29,10 @@ inject_css()
 # Sidebar
 # ---------------------------------------------------------------------------
 with st.sidebar:
-    render_data_management()
-    st.divider()
     filters = render_stock_filters()
 
-pattern_filters = filters["pattern_filters"]
-min_score       = filters["min_score"]
+pattern_opts = filters["pattern_opts"]
+min_score    = filters["min_score"]
 min_rs          = filters["min_rs"]
 rsi_range       = filters["rsi_range"]
 max_rmv         = filters["max_rmv"]
@@ -42,21 +41,35 @@ cap_min         = filters["cap_min"]
 cap_max         = filters["cap_max"]
 
 # ---------------------------------------------------------------------------
-# Header
+# Header — freshness-aware masthead
 # ---------------------------------------------------------------------------
-col_title, col_meta = st.columns([5, 2])
-with col_title:
-    st.markdown("# 📊 Momentum Stock Screener")
-    st.caption("EMA Stack 10 › 20 › 50 › 200  ·  " + "  ·  ".join(PATTERN_COLS) + "  ·  Sector Outperformance")
-with col_meta:
-    last = last_updated()
-    st.markdown(
-        f"<div style='text-align:right;padding-top:14px'>"
-        f"<span style='color:#6b7280;font-size:0.8rem'>LAST UPDATED</span><br>"
-        f"<span style='color:#d1d5db;font-size:0.88rem;font-weight:600'>{last}</span>"
-        f"</div>",
-        unsafe_allow_html=True,
-    )
+_fresh       = is_price_data_fresh()
+_age         = price_data_last_fetched()
+_fresh_rgb   = "34,197,94" if _fresh else "245,158,11"
+_fresh_color = "#22c55e"   if _fresh else "#f59e0b"
+_fresh_label = "LIVE"      if _fresh else "STALE"
+_pat_list    = "  ·  ".join(PATTERN_COLS)
+
+st.markdown(
+    f'<div style="display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:6px">'
+    f'<div>'
+    f'<div style="font-size:22px;font-weight:700;color:#f1f5f9;letter-spacing:-0.02em">'
+    f'<i class="ti ti-chart-bar" style="color:#6366f1;margin-right:8px"></i>Stocks Screener</div>'
+    f'<div style="font-size:12px;color:#64748b;margin-top:4px;line-height:1.6">'
+    f'EMA Stack 10 › 20 › 50 › 200  ·  {_pat_list}  ·  Sector Outperformance</div>'
+    f'</div>'
+    f'<div style="text-align:right;flex-shrink:0;padding-left:16px">'
+    f'<span style="display:inline-flex;align-items:center;gap:5px;'
+    f'background:rgba({_fresh_rgb},0.1);border:1px solid rgba({_fresh_rgb},0.25);'
+    f'color:{_fresh_color};border-radius:6px;padding:4px 10px;'
+    f'font-size:0.7rem;font-weight:700;letter-spacing:0.07em">'
+    f'<span style="width:6px;height:6px;border-radius:50%;background:{_fresh_color};'
+    f'display:inline-block;flex-shrink:0"></span>{_fresh_label}</span>'
+    f'<div style="font-size:0.72rem;color:#64748b;margin-top:5px">{_age}</div>'
+    f'</div>'
+    f'</div>',
+    unsafe_allow_html=True,
+)
 st.divider()
 
 # ---------------------------------------------------------------------------
@@ -74,9 +87,9 @@ except Exception:
 
 try:
     from src.sector_mapper import load_index_data
-    _, sector_indices, _ = load_index_data()
+    _benchmark_df, sector_indices, _nifty500_df = load_index_data()
 except Exception:
-    sector_indices = {}
+    _benchmark_df, sector_indices, _nifty500_df = None, {}, None
 
 sector_outperf = sector_outperformance_vs_nifty500()
 
@@ -87,7 +100,7 @@ sector_outperf = sector_outperformance_vs_nifty500()
 def _render_highlights(results, sector_indices):
     if results is None or results.empty:
         return
-    medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
+    medals = ["#1", "#2", "#3", "#4", "#5"]
     st.markdown("### Market Highlights")
     st.markdown("**Top Industries vs their Sector**")
     top_inds = top_industries_vs_sector(results, sector_indices, top_n=5)
@@ -113,10 +126,11 @@ render_top_stocks(results, sentiment_cache)
 # ---------------------------------------------------------------------------
 # Tabs
 # ---------------------------------------------------------------------------
-tab_screen, tab_ipo, tab_track = st.tabs([
-    "  📊  Screener Results  ",
-    "  🚀  IPO Setups  ",
-    "  📈  Performance Tracker  ",
+tab_screen, tab_ipo, tab_track, tab_rrg = st.tabs([
+    "  Screener Results  ",
+    "  IPO Setups  ",
+    "  Performance Tracker  ",
+    "  Sector Rotation  ",
 ])
 
 # ── Tab 1 — Screener ─────────────────────────────────────────────────────────
@@ -130,9 +144,9 @@ with tab_screen:
         if sentiment_cache:
             df["Sentiment"] = df["Symbol"].map(
                 lambda s: (
-                    ("🟢 Bullish" if sentiment_cache[s]["label"] == "Bullish" else
-                     "🔴 Bearish" if sentiment_cache[s]["label"] == "Bearish" else
-                     "⚪ Neutral")
+                    ("● Bullish" if sentiment_cache[s]["label"] == "Bullish" else
+                     "● Bearish" if sentiment_cache[s]["label"] == "Bearish" else
+                     "● Neutral")
                     if s in sentiment_cache else ""
                 )
             )
@@ -144,8 +158,8 @@ with tab_screen:
             )
 
         # Apply filters
-        for pat, active in pattern_filters.items():
-            if active and pat in df.columns:
+        for pat in pattern_opts:
+            if pat in df.columns:
                 df = df[df[pat] == True]
         df = df[df["Score"] >= min_score]
         if "RS Rating" in df.columns and min_rs > 1:
@@ -271,7 +285,7 @@ with tab_screen:
 
             # Chart View
             st.divider()
-            st.markdown("### 📈 Chart View")
+            st.markdown("### Chart View")
             chart_col1, chart_col2 = st.columns([3, 1])
             with chart_col1:
                 ranked_symbols = df.sort_values("Score", ascending=False)["Symbol"].tolist()
@@ -303,9 +317,9 @@ with tab_screen:
                     label     = sent_data.get("label", "Neutral")
                     reddit_ct = sent_data.get("reddit_mentions", 0)
                     label_html = (
-                        "<span style='color:#4ade80;font-weight:700'>🟢 Bullish</span>" if label == "Bullish" else
-                        "<span style='color:#f87171;font-weight:700'>🔴 Bearish</span>" if label == "Bearish" else
-                        "<span style='color:#9ca3af'>⚪ Neutral</span>"
+                        "<span style='color:#4ade80;font-weight:700'><span style='color:#22c55e'>●</span> Bullish</span>" if label == "Bullish" else
+                        "<span style='color:#f87171;font-weight:700'><span style='color:#ef4444'>●</span> Bearish</span>" if label == "Bearish" else
+                        "<span style='color:#9ca3af'><span style='color:#6b7280'>●</span> Neutral</span>"
                     )
                     st.markdown(
                         f"**Sentiment** — {label_html} &nbsp;·&nbsp; "
@@ -315,7 +329,8 @@ with tab_screen:
                     )
                     st.markdown("---")
                     for title, h_score in headlines:
-                        dot = "🟢" if h_score >= 0.05 else ("🔴" if h_score <= -0.05 else "⚪")
+                        dot_color = "#22c55e" if h_score >= 0.05 else ("#ef4444" if h_score <= -0.05 else "#6b7280")
+                        dot = f"<span style='color:{dot_color}'>●</span>"
                         st.markdown(
                             f"<div style='font-size:0.85rem;padding:3px 0;color:#cbd5e1'>"
                             f"{dot}&nbsp; {title}"
@@ -329,7 +344,7 @@ with tab_screen:
 with tab_ipo:
     render_ipo_section(ipo_results)
 
-    st.subheader("🕯️ Inside Bar + Low RMV  —  IPO-age stocks")
+    st.subheader("Inside Bar + Low RMV  —  IPO-age stocks")
     st.caption(
         f"Recently listed stocks (< {IPO_BASE_MAX_DAYS} trading days) with a daily "
         f"Inside Bar AND RMV ≤ {RMV_TIGHT_THRESHOLD * 2} — compressed volatility, "
@@ -464,6 +479,215 @@ with tab_track:
                 file_name="screener_tracker.csv",
                 mime="text/csv",
             )
+
+# ── Tab 4 — Sector Rotation (RRG) ────────────────────────────────────────────
+with tab_rrg:
+    from src.rrg import compute_rrg
+    from src.index_screener import load_index_ohlcv
+
+    index_ohlcv   = load_index_ohlcv()
+    rrg_benchmark = (
+        _nifty500_df if (_nifty500_df is not None and not _nifty500_df.empty)
+        else _benchmark_df
+    )
+
+    if not index_ohlcv or rrg_benchmark is None:
+        st.info(
+            "No index data available. Run **📥 Refresh Stock Data** "
+            "then **🔍 Run Screener** in the sidebar."
+        )
+    else:
+        # --- Explanation banner ---
+        st.markdown(
+            "<div style='background:rgba(255,255,255,0.04);border-radius:8px;"
+            "padding:10px 16px;font-size:0.83rem;color:#94a3b8;margin-bottom:14px'>"
+            "Each point is an NSE sector / thematic index plotted against "
+            "<b style='color:#e2e8f0'>Nifty 500</b> on two axes: "
+            "<b style='color:#e2e8f0'>RS-Ratio</b> (outperforming vs underperforming) and "
+            "<b style='color:#e2e8f0'>RS-Momentum</b> (accelerating vs decelerating). "
+            "The tail shows the last N periods of movement. "
+            "Normal rotation is clockwise: "
+            "<span style='color:#60a5fa'>Improving</span> → "
+            "<span style='color:#22c55e'>Leading</span> → "
+            "<span style='color:#f59e0b'>Weakening</span> → "
+            "<span style='color:#ef4444'>Lagging</span>."
+            "</div>",
+            unsafe_allow_html=True,
+        )
+
+        # --- Parameters ---
+        pc1, pc2, pc3, _ = st.columns([1, 1, 1, 4])
+        with pc1:
+            rrg_m    = st.number_input("EMA Window (m)", 5, 30, 14, 1, key="rrg_m")
+        with pc2:
+            rrg_k    = st.number_input("ROC Period (k)", 3, 20, 10, 1, key="rrg_k")
+        with pc3:
+            rrg_tail = st.number_input("Trail Length",   3, 16,  8, 1, key="rrg_tail")
+
+        st.write("")
+
+        # --- Shared render function (called by both Daily and Weekly sub-tabs) ---
+        def _render_rrg_level(weekly: bool, suffix: str) -> None:
+            label = "Weekly" if weekly else "Daily"
+
+            with st.spinner(f"Computing {label} RRG for {len(index_ohlcv)} sector indices…"):
+                sector_rrg = compute_rrg(
+                    index_ohlcv, rrg_benchmark,
+                    m=rrg_m, k=rrg_k, tail=rrg_tail, weekly=weekly,
+                )
+
+            if sector_rrg.empty:
+                st.info(
+                    f"Not enough history to render the {label} RRG. "
+                    "Try reducing EMA Window or ROC Period, or run Fetch Data first."
+                )
+                return
+
+            # Quadrant summary badges
+            q_counts = sector_rrg["quadrant"].value_counts()
+            bc1, bc2, bc3, bc4 = st.columns(4)
+            for col, qname, color in [
+                (bc1, "Leading",   "#22c55e"),
+                (bc2, "Improving", "#60a5fa"),
+                (bc3, "Weakening", "#f59e0b"),
+                (bc4, "Lagging",   "#ef4444"),
+            ]:
+                n = q_counts.get(qname, 0)
+                col.markdown(
+                    f"<div style='text-align:center;padding:8px 4px;"
+                    f"background:rgba(255,255,255,0.04);border-radius:6px;"
+                    f"border-top:2px solid {color}'>"
+                    f"<div style='font-size:1.5rem;font-weight:800;color:{color}'>{n}</div>"
+                    f"<div style='font-size:0.72rem;color:#94a3b8;letter-spacing:0.04em'>{qname}</div>"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+            st.write("")
+
+            # Sector RRG chart
+            render_rrg_chart(
+                sector_rrg,
+                title=f"NSE Sector Indices vs Nifty 500 — {label}",
+            )
+
+            # Summary table sorted by quadrant priority then RS-Ratio desc
+            _Q_ORDER = {"Leading": 0, "Improving": 1, "Weakening": 2, "Lagging": 3}
+            tbl = sector_rrg[["name", "rs_ratio", "rs_momentum", "quadrant"]].copy()
+            tbl["_q"] = tbl["quadrant"].map(_Q_ORDER)
+            tbl = (tbl.sort_values(["_q", "rs_ratio"], ascending=[True, False])
+                   .drop(columns=["_q"]).reset_index(drop=True))
+            tbl.columns = ["Index / Sector", "RS-Ratio", "RS-Momentum", "Quadrant"]
+            st.dataframe(
+                tbl.style.format({"RS-Ratio": "{:.2f}", "RS-Momentum": "{:.2f}"}),
+                use_container_width=True, hide_index=True,
+                height=min(38 * (len(tbl) + 1), 380),
+            )
+
+            # ── Stock drill-down ──────────────────────────────────────────────
+            st.divider()
+            st.markdown("#### Drill Down — Stocks within a Sector")
+            st.caption(
+                "Select a yfinance sector to plot its constituent stocks on an RRG "
+                "vs Nifty 500. Use the sector index chart above as a guide to which "
+                "sectors are Leading or Improving."
+            )
+
+            if results is None or results.empty or "Sector" not in results.columns:
+                st.info("Run the screener first to enable stock-level drill-down.")
+                return
+
+            sectors_avail = sorted(results["Sector"].dropna().unique().tolist())
+            sel_sector = st.selectbox(
+                "Select sector",
+                ["— pick a sector —"] + sectors_avail,
+                key=f"rrg_sector_{suffix}",
+            )
+            if sel_sector == "— pick a sector —":
+                return
+
+            # Build {company_name: OHLCV} for stocks in this sector
+            from src.data_fetcher import load_price_data as _lpd
+            with st.spinner("Loading price data for drill-down…"):
+                all_pd = _lpd()
+
+            if not all_pd:
+                st.warning("Price data not available — run **Fetch Data** first.")
+                return
+
+            sector_rows = results[results["Sector"] == sel_sector]
+            sym_to_label = {
+                f"{r['Symbol']}.NS": r.get("Company", r["Symbol"])
+                for _, r in sector_rows.iterrows()
+            }
+            sector_pd = {
+                sym_to_label[t]: all_pd[t]
+                for t in sym_to_label
+                if t in all_pd
+            }
+
+            if not sector_pd:
+                st.info(f"No price data found for stocks in **{sel_sector}**.")
+                return
+
+            with st.spinner(
+                f"Computing {label} RRG for {len(sector_pd)} stocks in {sel_sector}…"
+            ):
+                stock_rrg = compute_rrg(
+                    sector_pd, rrg_benchmark,
+                    m=rrg_m, k=rrg_k, tail=rrg_tail, weekly=weekly,
+                )
+
+            if stock_rrg.empty:
+                st.info(
+                    f"Not enough price history for a {label} stock RRG in {sel_sector}. "
+                    "Try switching to Daily or reducing EMA/ROC parameters."
+                )
+                return
+
+            q2 = stock_rrg["quadrant"].value_counts()
+            sc1, sc2, sc3, sc4 = st.columns(4)
+            for col, qname, color in [
+                (sc1, "Leading",   "#22c55e"),
+                (sc2, "Improving", "#60a5fa"),
+                (sc3, "Weakening", "#f59e0b"),
+                (sc4, "Lagging",   "#ef4444"),
+            ]:
+                col.markdown(
+                    f"<div style='text-align:center;padding:6px 4px;"
+                    f"background:rgba(255,255,255,0.04);border-radius:6px;"
+                    f"border-top:2px solid {color}'>"
+                    f"<div style='font-size:1.3rem;font-weight:700;color:{color}'>{q2.get(qname, 0)}</div>"
+                    f"<div style='font-size:0.72rem;color:#94a3b8'>{qname}</div>"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+            st.write("")
+
+            render_rrg_chart(
+                stock_rrg,
+                title=f"{sel_sector} — Stocks vs Nifty 500 · {label}  ({len(stock_rrg)} stocks)",
+            )
+
+            stbl = stock_rrg[["name", "rs_ratio", "rs_momentum", "quadrant"]].copy()
+            stbl["_q"] = stbl["quadrant"].map(_Q_ORDER)
+            stbl = (stbl.sort_values(["_q", "rs_ratio"], ascending=[True, False])
+                    .drop(columns=["_q"]).reset_index(drop=True))
+            stbl.columns = ["Stock", "RS-Ratio", "RS-Momentum", "Quadrant"]
+            st.dataframe(
+                stbl.style.format({"RS-Ratio": "{:.2f}", "RS-Momentum": "{:.2f}"}),
+                use_container_width=True, hide_index=True,
+                height=min(38 * (len(stbl) + 1), 450),
+            )
+
+        # Daily / Weekly sub-tabs
+        day_tab, week_tab = st.tabs(["  Daily  ", "  Weekly  "])
+
+        with day_tab:
+            _render_rrg_level(weekly=False, suffix="day")
+
+        with week_tab:
+            _render_rrg_level(weekly=True, suffix="week")
+
 
 st.caption(
     "Data: Yahoo Finance (yfinance)  ·  Benchmark: NiftyMidSmallCap400  ·  "

@@ -12,13 +12,23 @@ import pandas as pd
 from config import (
     EMA_PERIODS, RSI_PERIOD,
     VCP_RUNUP_LOOKBACK, VCP_RUNUP_MIN_PCT, VCP_CONSOL_WEEKS,
-    VOL_SHORT_PERIOD, VOL_LONG_PERIOD, VOL_CONTRACTION_RATIO,
+    VCP_CONTRACTION_TOLERANCE, VCP_VOL_DRY_UP_RATIO, VCP_MAX_BASE_DEPTH_PCT,
+    VOL_SHORT_PERIOD, VOL_LONG_PERIOD, VOL_EXTENDED_PERIOD, VOL_CONTRACTION_RATIO,
+    VOL_PRICE_STABILITY_PCT, VOL_DISTRIB_DAY_PCT,
     EMA10_UPPER_PCT, EMA10_LOWER_PCT, KMA_BAND_PCT,
     RMV_LOOKBACK, RMV_TIGHT_THRESHOLD,
     WEEKLY_DAYS, MONTHLY_DAYS,
     IPO_BASE_MAX_DAYS, IPO_BASE_MIN_DAYS, IPO_BASE_SKIP_DAYS,
     IPO_BASE_RANGE_MAX, IPO_BREAKOUT_LOWER, IPO_BREAKOUT_UPPER,
     IPO_VOL_PICKUP_RATIO,
+    SYMTRI_LOOKBACK, SYMTRI_MIN_TOUCHES, SYMTRI_SWING_WINDOW, SYMTRI_MIN_BARS_TO_APEX,
+    SYMTRI_MIN_SPAN_BARS, SYMTRI_MIN_START_WIDTH_PCT,
+    SYMTRI_R2_THRESHOLD, SYMTRI_SLOPE_SYMMETRY_MIN, SYMTRI_SLOPE_SYMMETRY_MAX,
+    SYMTRI_REQUIRE_VOL_CONTRACTION,
+    ASCTRI_LOOKBACK, ASCTRI_MIN_TOUCHES_RESIST, ASCTRI_MIN_TOUCHES_SUPPORT,
+    ASCTRI_SWING_WINDOW, ASCTRI_MIN_SPAN_BARS, ASCTRI_MAX_SPAN_BARS,
+    ASCTRI_RESIST_MAX_SLOPE_PCT, ASCTRI_SUPPORT_MIN_SLOPE_PCT, ASCTRI_SUPPORT_R2,
+    ASCTRI_VOL_END_RATIO, ASCTRI_RSI_MIN, ASCTRI_RSI_MAX, ASCTRI_REQUIRE_ABOVE_200DMA,
 )
 
 
@@ -102,12 +112,20 @@ def get_performance(df: pd.DataFrame) -> tuple[float, float]:
 
 def detect_vcp(df: pd.DataFrame) -> bool:
     """
-    Returns True if the stock shows a Volatility Contraction Pattern:
-      1. A prior run-up of ≥ VCP_RUNUP_MIN_PCT in the VCP_RUNUP_LOOKBACK days
-         before the consolidation window.
-      2. Last VCP_CONSOL_WEEKS weeks each show:
-         - Smaller price range than the previous week (range = (High-Low)/Close_avg)
-         - Lower average volume than the previous week
+    Returns True if the stock shows a Volatility Contraction Pattern.
+
+    Improvements over naive range-based detection:
+      1. Temporal run-up: low_idx = argmin(Low) then gain = (max High after low_idx
+         − low) / low — enforces that the Low preceded the High (directional move,
+         not a crash-recovery range artifact).
+      2. VCP_CONSOL_WEEKS defaults to 4 (Indian mid/small caps need more coiling).
+      3. Tolerance band: each week must be ≥ VCP_CONTRACTION_TOLERANCE tighter than
+         the prior week (avoids failing on near-flat weeks in a genuine VCP).
+      4. Base depth check: final (tightest) week's range ≤ VCP_MAX_BASE_DEPTH_PCT —
+         the stock must have genuinely compressed, not just plateaued at a wide level.
+      5. Volume dry-up vs run-up: consolidation average volume compared to run-up
+         average volume (< VCP_VOL_DRY_UP_RATIO), not just week-over-week, which
+         is the true accumulation signal.
     """
     consol_days = VCP_CONSOL_WEEKS * 5
     min_needed = VCP_RUNUP_LOOKBACK + consol_days
@@ -117,15 +135,18 @@ def detect_vcp(df: pd.DataFrame) -> bool:
     runup_slice = df.iloc[-(min_needed):-consol_days]
     consol_slice = df.tail(consol_days)
 
-    # --- Prior run-up check ---
+    # --- Prior run-up check (temporally ordered: low must come before high) ---
     if len(runup_slice) < 5:
         return False
-    runup_low = runup_slice["Low"].min()
-    runup_high = runup_slice["High"].max()
+    low_idx = int(runup_slice["Low"].values.argmin())
+    runup_low = float(runup_slice["Low"].iloc[low_idx])
     if runup_low <= 0:
         return False
+    runup_high = float(runup_slice["High"].iloc[low_idx:].max())
     if (runup_high - runup_low) / runup_low < VCP_RUNUP_MIN_PCT:
         return False
+
+    runup_avg_vol = float(runup_slice["Volume"].mean())
 
     # --- Consolidation contraction check ---
     weeks = []
@@ -135,16 +156,30 @@ def detect_vcp(df: pd.DataFrame) -> bool:
             continue
         close_avg = w["Close"].mean()
         price_range_pct = (w["High"].max() - w["Low"].min()) / close_avg if close_avg > 0 else 0
-        avg_vol = w["Volume"].mean()
+        avg_vol = float(w["Volume"].mean())
         weeks.append((price_range_pct, avg_vol))
 
     if len(weeks) < 2:
         return False
 
-    range_contracting = all(weeks[i][0] > weeks[i + 1][0] for i in range(len(weeks) - 1))
-    vol_contracting = all(weeks[i][1] > weeks[i + 1][1] for i in range(len(weeks) - 1))
+    # Each week must tighten by at least VCP_CONTRACTION_TOLERANCE vs prior week
+    range_contracting = all(
+        weeks[i + 1][0] <= weeks[i][0] * (1 - VCP_CONTRACTION_TOLERANCE)
+        for i in range(len(weeks) - 1)
+    )
+    if not range_contracting:
+        return False
 
-    return range_contracting and vol_contracting
+    # Final week must be genuinely tight (absolute depth check)
+    if weeks[-1][0] > VCP_MAX_BASE_DEPTH_PCT:
+        return False
+
+    # Volume must have dried up relative to the run-up, not just week-over-week
+    consol_avg_vol = float(consol_slice["Volume"].mean())
+    if runup_avg_vol > 0 and consol_avg_vol / runup_avg_vol >= VCP_VOL_DRY_UP_RATIO:
+        return False
+
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -152,14 +187,58 @@ def detect_vcp(df: pd.DataFrame) -> bool:
 # ---------------------------------------------------------------------------
 
 def detect_volume_contraction(df: pd.DataFrame) -> bool:
-    """Recent 5-day average volume is below VOL_CONTRACTION_RATIO of 20-day average."""
+    """
+    True when recent volume has genuinely dried up in an accumulation context.
+
+    Three-tier volume check:
+      Tier 1 (required): mean(Vol[-5:]) / mean(Vol[-20:])  < VOL_CONTRACTION_RATIO
+      Tier 2 (required): mean(Vol[-5:]) / mean(Vol[-50:])  < VOL_CONTRACTION_RATIO
+                         (only applied when 50 bars of history are available)
+      Tier 3 (guard):    no distribution day in the recent window — a bar
+                         that closes >VOL_DISTRIB_DAY_PCT below its open on
+                         above-average volume signals active selling, not quiet rest.
+
+    Price stability guard:
+      If price fell more than VOL_PRICE_STABILITY_PCT over the short window the
+      low volume reflects distribution (sellers in control), not accumulation.
+    """
     if len(df) < VOL_LONG_PERIOD:
         return False
-    recent = df["Volume"].tail(VOL_SHORT_PERIOD).mean()
-    historical = df["Volume"].tail(VOL_LONG_PERIOD).mean()
-    if historical <= 0:
+
+    short = df.tail(VOL_SHORT_PERIOD)
+    recent_vol   = float(short["Volume"].mean())
+    hist_vol     = float(df["Volume"].tail(VOL_LONG_PERIOD).mean())
+
+    if hist_vol <= 0:
         return False
-    return (recent / historical) < VOL_CONTRACTION_RATIO
+
+    # Tier 1 — 5d vs 20d
+    if recent_vol / hist_vol >= VOL_CONTRACTION_RATIO:
+        return False
+
+    # Tier 2 — 5d vs 50d (stronger baseline, applied when history allows)
+    if len(df) >= VOL_EXTENDED_PERIOD:
+        extended_vol = float(df["Volume"].tail(VOL_EXTENDED_PERIOD).mean())
+        if extended_vol > 0 and recent_vol / extended_vol >= VOL_CONTRACTION_RATIO:
+            return False
+
+    # Price stability — low volume + falling price = distribution, not accumulation
+    if len(short) >= 2:
+        p_start = float(short["Close"].iloc[0])
+        p_end   = float(short["Close"].iloc[-1])
+        if p_start > 0 and (p_end - p_start) / p_start < -VOL_PRICE_STABILITY_PCT:
+            return False
+
+    # Distribution day filter — any bar down >1% intraday on above-average volume
+    for _, row in short.iterrows():
+        bar_open  = float(row["Open"])
+        bar_close = float(row["Close"])
+        bar_vol   = float(row["Volume"])
+        if bar_open > 0 and (bar_close - bar_open) / bar_open < -VOL_DISTRIB_DAY_PCT:
+            if bar_vol > hist_vol:
+                return False
+
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -167,67 +246,103 @@ def detect_volume_contraction(df: pd.DataFrame) -> bool:
 # ---------------------------------------------------------------------------
 
 # Tuneable constants (kept here for co-location with the algorithm)
-_FLAG_DAYS = 15          # Max length of flag consolidation body
-_POLE_DAYS = 10          # Max length of the flagpole
-_BASELINE_DAYS = 20      # Days before the pole used for volume baseline
-_MIN_POLE_GAIN = 0.15    # Pole must gain ≥ 15%
-_MIN_VOL_RATIO = 2.0     # Pole avg volume ≥ 2× baseline avg volume
-_MAX_FLAG_RANGE = 0.12   # Flag body range (High-Low)/CMP ≤ 12%
-_MAX_RETRACE = 0.50      # Price must not give back more than 50% of pole move
+_FLAG_DAYS        = 15     # Max length of flag consolidation body
+_POLE_SCAN_WINDOW = 30     # Bars before flag to scan for the pole (handles variable-length poles)
+_POLE_MIN_DAYS    = 3      # Minimum pole length in bars
+_POLE_MAX_DAYS    = 15     # Maximum pole length in bars
+_BASELINE_DAYS    = 20     # Days before the scan window used for volume baseline
+_MIN_POLE_GAIN    = 0.15   # Min gain (temporally-ordered trough→peak) to qualify as a pole
+_MIN_VOL_RATIO    = 2.0    # Pole avg volume ≥ 2× baseline avg volume
+_MAX_FLAG_RANGE   = 0.12   # Flag body (High−Low)/CMP ≤ 12%
+_MAX_RETRACE      = 0.50   # Flag low ≥ pole_peak − 50% of pole move
+_FLAG_MAX_SLOPE   = 0.002  # Max flag close slope per bar as fraction of price (rising wedge filter)
+_FLAG_BREAKOUT_ZONE = 2/3  # Current close must be in the upper third of the flag range
 
 
 def detect_flag(df: pd.DataFrame) -> bool:
     """
-    Bull Flag Pattern:
-      Pole  — price gained ≥ MIN_POLE_GAIN in POLE_DAYS with volume ≥ 2× baseline
-      Flag  — last FLAG_DAYS days: tight range, declining volume, limited retracement
+    Bull Flag Pattern.
+
+    Pole  — located by scanning _POLE_SCAN_WINDOW bars before the flag for the highest
+            High (peak); the trough is the lowest Low before that peak within the same
+            window. Gain is measured trough→peak (temporally ordered). Pole span must
+            be between _POLE_MIN_DAYS and _POLE_MAX_DAYS.
+    Flag  — last _FLAG_DAYS bars: tight range, slightly downward/sideways slope
+            (upward slope = rising wedge, rejected), declining volume, current close
+            in the upper third of the flag range (breakout readiness).
 
     Timeline (from oldest to newest):
-      [...baseline_20d...][...pole_10d...][...flag_15d...] ← today
+      [...baseline_20d...][...pole-scan_30d...][...flag_15d...] ← today
     """
-    needed = _FLAG_DAYS + _POLE_DAYS + _BASELINE_DAYS
+    needed = _FLAG_DAYS + _POLE_SCAN_WINDOW + _BASELINE_DAYS
     if len(df) < needed:
         return False
 
     flag_slice = df.tail(_FLAG_DAYS)
-    pole_slice = df.iloc[-(_FLAG_DAYS + _POLE_DAYS) : -_FLAG_DAYS]
-    base_slice = df.iloc[-(_FLAG_DAYS + _POLE_DAYS + _BASELINE_DAYS) : -(_FLAG_DAYS + _POLE_DAYS)]
+    scan_slice = df.iloc[-(_FLAG_DAYS + _POLE_SCAN_WINDOW) : -_FLAG_DAYS]
+    base_slice = df.iloc[-(_FLAG_DAYS + _POLE_SCAN_WINDOW + _BASELINE_DAYS) : -(_FLAG_DAYS + _POLE_SCAN_WINDOW)]
 
-    if len(pole_slice) < 3 or len(base_slice) < 5:
+    if len(base_slice) < 5:
         return False
 
-    # --- Pole: price gain ---
-    pole_start = float(pole_slice["Close"].iloc[0])
-    pole_peak = float(pole_slice["High"].max())
-    if pole_start <= 0:
+    # --- (a)/(b) Locate pole via scan: peak = highest High; trough = lowest Low before peak ---
+    scan_highs = scan_slice["High"].to_numpy(dtype=float)
+    scan_lows  = scan_slice["Low"].to_numpy(dtype=float)
+    peak_pos   = int(scan_highs.argmax())
+
+    if peak_pos < _POLE_MIN_DAYS:
+        return False    # not enough room before the peak for a valid pole
+
+    trough_pos   = int(scan_lows[:peak_pos].argmin())
+    pole_span    = peak_pos - trough_pos
+    if pole_span < _POLE_MIN_DAYS or pole_span > _POLE_MAX_DAYS:
         return False
-    if (pole_peak - pole_start) / pole_start < _MIN_POLE_GAIN:
+
+    peak_price   = float(scan_highs[peak_pos])
+    trough_price = float(scan_lows[trough_pos])
+    if trough_price <= 0:
+        return False
+
+    # (b) Pole gain: trough precedes peak — no crash-recovery artifacts
+    if (peak_price - trough_price) / trough_price < _MIN_POLE_GAIN:
         return False
 
     # --- Pole: volume spike vs baseline ---
-    pole_vol = float(pole_slice["Volume"].mean())
-    base_vol = float(base_slice["Volume"].mean())
+    pole_slice = scan_slice.iloc[trough_pos : peak_pos + 1]
+    pole_vol   = float(pole_slice["Volume"].mean())
+    base_vol   = float(base_slice["Volume"].mean())
     if base_vol <= 0 or pole_vol / base_vol < _MIN_VOL_RATIO:
         return False
 
     # --- Flag: tight price range ---
     current_price = float(flag_slice["Close"].iloc[-1])
-    flag_high = float(flag_slice["High"].max())
-    flag_low = float(flag_slice["Low"].min())
+    flag_high     = float(flag_slice["High"].max())
+    flag_low      = float(flag_slice["Low"].min())
     if current_price <= 0:
         return False
     if (flag_high - flag_low) / current_price > _MAX_FLAG_RANGE:
         return False
 
     # --- Flag: limited retracement from pole peak ---
-    pole_move = pole_peak - pole_start
-    max_allowable_low = pole_peak - pole_move * _MAX_RETRACE
+    pole_move         = peak_price - trough_price
+    max_allowable_low = peak_price - pole_move * _MAX_RETRACE
     if flag_low < max_allowable_low:
         return False
 
     # --- Flag: volume declining vs pole ---
     flag_vol = float(flag_slice["Volume"].mean())
     if flag_vol >= pole_vol:
+        return False
+
+    # --- (c) Flag slope — upward slope signals a rising wedge, not a bull flag ---
+    flag_x = np.arange(len(flag_slice), dtype=float)
+    flag_slope, _ = np.polyfit(flag_x, flag_slice["Close"].to_numpy(dtype=float), 1)
+    if flag_slope > _FLAG_MAX_SLOPE * current_price:
+        return False
+
+    # --- (d) Breakout readiness — current close must be in the upper third of the flag ---
+    flag_range = flag_high - flag_low
+    if flag_range > 0 and current_price < flag_low + _FLAG_BREAKOUT_ZONE * flag_range:
         return False
 
     return True
@@ -543,3 +658,366 @@ def calculate_rs_raw_score(
     if m3_w > 0.0:
         return (m2_score + m3_total / m3_w) / 2.0
     return m2_score
+
+
+# ---------------------------------------------------------------------------
+# Symmetrical Triangle pattern
+# ---------------------------------------------------------------------------
+
+def detect_symmetrical_triangle(
+    df: pd.DataFrame,
+    lookback: int = SYMTRI_LOOKBACK,
+    min_touches: int = SYMTRI_MIN_TOUCHES,
+    swing_window: int = SYMTRI_SWING_WINDOW,
+) -> dict:
+    """
+    Detect a Symmetrical Triangle: converging upper trendline (lower highs) and
+    lower trendline (higher lows) that meet at a future apex.
+
+    Parameters
+    ----------
+    df            : OHLCV DataFrame (requires High, Low, Close, Volume columns)
+    lookback      : bars to scan (default SYMTRI_LOOKBACK = 90)
+    min_touches   : minimum swing pivots per trendline (default SYMTRI_MIN_TOUCHES = 3)
+    swing_window  : bars each side required to qualify a swing pivot (default 3)
+
+    Notes
+    -----
+    Confirmation lag: the most recent `swing_window` bars cannot produce a pivot
+    because the look-ahead window has not yet closed. Triangle signals therefore
+    lag by `swing_window` bars — a deliberate tradeoff between recency and
+    reliability that must be accounted for in entry timing.
+
+    Returns
+    -------
+    dict with keys:
+      detected          bool
+      upper_slope       float | None   — negative slope of upper trendline
+      upper_intercept   float | None
+      lower_slope       float | None   — positive slope of lower trendline
+      lower_intercept   float | None
+      upper_pivots      list[(bar_idx, price)]  — swing highs used for fit
+      lower_pivots      list[(bar_idx, price)]  — swing lows used for fit
+      n_slice           int            — length of detection window (for chart mapping)
+    """
+    _empty = dict(
+        detected=False,
+        upper_slope=None, upper_intercept=None,
+        lower_slope=None, lower_intercept=None,
+        upper_pivots=[], lower_pivots=[],
+        n_slice=0,
+    )
+
+    min_needed = 2 * swing_window + 2 * min_touches + 4
+    if len(df) < min_needed:
+        return _empty
+
+    n_use = min(lookback, len(df))
+    sl = df.iloc[-n_use:]
+    n = len(sl)
+
+    highs = sl["High"].to_numpy(dtype=float)
+    lows = sl["Low"].to_numpy(dtype=float)
+
+    swing_highs: list[tuple[int, float]] = []
+    swing_lows:  list[tuple[int, float]] = []
+
+    # Strict comparison on BOTH sides prevents double-counting pivots on flat-top
+    # formations. The most recent swing_window bars are ineligible — see docstring.
+    for i in range(swing_window, n - swing_window):
+        left_h  = highs[i - swing_window: i].max()
+        right_h = highs[i + 1: i + swing_window + 1].max()
+        if highs[i] > left_h and highs[i] > right_h:       # strict both sides
+            swing_highs.append((i, highs[i]))
+
+        left_l  = lows[i - swing_window: i].min()
+        right_l = lows[i + 1: i + swing_window + 1].min()
+        if lows[i] < left_l and lows[i] < right_l:         # strict both sides
+            swing_lows.append((i, lows[i]))
+
+    if len(swing_highs) < min_touches or len(swing_lows) < min_touches:
+        return _empty
+
+    sh_x = np.array([p[0] for p in swing_highs], dtype=float)
+    sh_y = np.array([p[1] for p in swing_highs], dtype=float)
+    sl_x = np.array([p[0] for p in swing_lows],  dtype=float)
+    sl_y = np.array([p[1] for p in swing_lows],  dtype=float)
+
+    # Pattern must span enough bars so it's a real formation, not tick noise
+    pivot_span = max(sh_x[-1], sl_x[-1]) - min(sh_x[0], sl_x[0])
+    if pivot_span < SYMTRI_MIN_SPAN_BARS:
+        return _empty
+
+    u_slope, u_intercept = np.polyfit(sh_x, sh_y, 1)
+    l_slope, l_intercept = np.polyfit(sl_x, sl_y, 1)
+
+    # R² quality gate — polyfit on 3 points is near-deterministic; a good R²
+    # filters noisy pivot sets that merely trend in the right direction by chance
+    def _r2(x: np.ndarray, y: np.ndarray, slope: float, intercept: float) -> float:
+        y_pred = slope * x + intercept
+        ss_res = float(np.sum((y - y_pred) ** 2))
+        ss_tot = float(np.sum((y - y.mean()) ** 2))
+        if ss_tot == 0.0:
+            return 1.0 if ss_res == 0.0 else 0.0
+        return 1.0 - ss_res / ss_tot
+
+    if _r2(sh_x, sh_y, u_slope, u_intercept) < SYMTRI_R2_THRESHOLD:
+        return _empty
+    if _r2(sl_x, sl_y, l_slope, l_intercept) < SYMTRI_R2_THRESHOLD:
+        return _empty
+
+    # Upper line must descend (lower highs), lower line must ascend (higher lows)
+    if u_slope >= 0 or l_slope <= 0:
+        return _empty
+
+    # Slope symmetry: ensures we're detecting a genuinely symmetric triangle
+    # and not a wedge or descending/ascending triangle mislabelled as symmetric
+    slope_ratio = abs(u_slope) / abs(l_slope)
+    if not (SYMTRI_SLOPE_SYMMETRY_MIN <= slope_ratio <= SYMTRI_SLOPE_SYMMETRY_MAX):
+        return _empty
+
+    # Slopes must be economically meaningful: each trendline must move by at
+    # least SYMTRI_MIN_START_WIDTH_PCT / 2 of price across the pattern span
+    current_close = float(sl["Close"].iloc[-1])
+    if current_close <= 0:
+        return _empty
+    min_slope_mag = (current_close * SYMTRI_MIN_START_WIDTH_PCT / 2) / max(pivot_span, 1)
+    if abs(u_slope) < min_slope_mag or abs(l_slope) < min_slope_mag:
+        return _empty
+
+    # Lines must intersect in the future (apex ahead of current bar)
+    slope_diff = u_slope - l_slope
+    if abs(slope_diff) < 1e-10:
+        return _empty
+    x_apex = (l_intercept - u_intercept) / slope_diff
+    last_x = float(n - 1)
+    if x_apex <= last_x:
+        return _empty
+
+    # Triangle must still be meaningfully open (apex is not imminent)
+    if x_apex - last_x < SYMTRI_MIN_BARS_TO_APEX:
+        return _empty
+
+    # Current price must sit inside the triangle
+    current_upper = u_slope * last_x + u_intercept
+    current_lower = l_slope * last_x + l_intercept
+    if not (current_lower <= current_close <= current_upper):
+        return _empty
+
+    # Starting width must be large enough to be a real pattern
+    first_x = min(sh_x[0], sl_x[0])
+    width_first = (u_slope * first_x + u_intercept) - (l_slope * first_x + l_intercept)
+    if width_first < current_close * SYMTRI_MIN_START_WIDTH_PCT:
+        return _empty
+
+    # Width must genuinely contract from first pivot to current bar
+    width_last = current_upper - current_lower
+    if width_last >= width_first or width_first <= 0:
+        return _empty
+
+    # Pattern must not be essentially closed already (width > 0.5% of price)
+    if width_last < current_close * 0.005:
+        return _empty
+
+    # Volume must contract into the apex (second-half avg < first-half avg)
+    if SYMTRI_REQUIRE_VOL_CONTRACTION and "Volume" in sl.columns:
+        mid = n // 2
+        vol_first  = float(sl["Volume"].iloc[:mid].mean())
+        vol_second = float(sl["Volume"].iloc[mid:].mean())
+        if vol_first > 0 and vol_second >= vol_first:
+            return _empty
+
+    return dict(
+        detected=True,
+        upper_slope=float(u_slope),
+        upper_intercept=float(u_intercept),
+        lower_slope=float(l_slope),
+        lower_intercept=float(l_intercept),
+        upper_pivots=[(int(i), float(y)) for i, y in zip(sh_x, sh_y)],
+        lower_pivots=[(int(i), float(y)) for i, y in zip(sl_x, sl_y)],
+        n_slice=n,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Ascending Triangle pattern
+# ---------------------------------------------------------------------------
+
+def detect_ascending_triangle(
+    df: pd.DataFrame,
+    lookback: int = ASCTRI_LOOKBACK,
+    min_touches_resist: int = ASCTRI_MIN_TOUCHES_RESIST,
+    min_touches_support: int = ASCTRI_MIN_TOUCHES_SUPPORT,
+    swing_window: int = ASCTRI_SWING_WINDOW,
+) -> dict:
+    """
+    Detect an Ascending Triangle: flat-to-slightly-rising resistance (horizontal
+    ceiling tested multiple times) and a rising support line (higher lows) that
+    converges toward the resistance — a classic bullish continuation setup.
+
+    Additional context filters (applied when indicator columns are present):
+      - Price above 200-day EMA (ASCTRI_REQUIRE_ABOVE_200DMA)
+      - RSI between ASCTRI_RSI_MIN and ASCTRI_RSI_MAX (not oversold / overbought)
+      - Volume declining over the formation (linear slope < 0 + end/start ratio)
+      - OBV net non-negative (accumulation, not distribution)
+
+    Returns
+    -------
+    dict with keys:
+      detected           bool
+      resist_slope       float | None  — near-zero slope of resistance line
+      resist_intercept   float | None
+      support_slope      float | None  — positive slope of support line
+      support_intercept  float | None
+      resist_pivots      list[(bar_idx, price)]
+      support_pivots     list[(bar_idx, price)]
+      n_slice            int
+    """
+    _empty = dict(
+        detected=False,
+        resist_slope=None, resist_intercept=None,
+        support_slope=None, support_intercept=None,
+        resist_pivots=[], support_pivots=[],
+        n_slice=0,
+    )
+
+    min_needed = 2 * swing_window + 2 * max(min_touches_resist, min_touches_support) + 4
+    if len(df) < min_needed:
+        return _empty
+
+    # --- Trend context: above 200 EMA ---
+    if ASCTRI_REQUIRE_ABOVE_200DMA and "ema_200" in df.columns:
+        ema200 = float(df["ema_200"].iloc[-1])
+        if ema200 > 0 and float(df["Close"].iloc[-1]) < ema200:
+            return _empty
+
+    n_use = min(lookback, len(df))
+    if n_use < ASCTRI_MIN_SPAN_BARS + 2 * swing_window:
+        return _empty
+    sl = df.iloc[-n_use:]
+    n = len(sl)
+
+    highs = sl["High"].to_numpy(dtype=float)
+    lows  = sl["Low"].to_numpy(dtype=float)
+
+    resist_pivots: list[tuple[int, float]] = []
+    support_pivots: list[tuple[int, float]] = []
+
+    for i in range(swing_window, n - swing_window):
+        lh = highs[i - swing_window: i].max()
+        rh = highs[i + 1: i + swing_window + 1].max()
+        if highs[i] > lh and highs[i] > rh:
+            resist_pivots.append((i, highs[i]))
+
+        ll = lows[i - swing_window: i].min()
+        rl = lows[i + 1: i + swing_window + 1].min()
+        if lows[i] < ll and lows[i] < rl:
+            support_pivots.append((i, lows[i]))
+
+    if len(resist_pivots) < min_touches_resist or len(support_pivots) < min_touches_support:
+        return _empty
+
+    rx = np.array([p[0] for p in resist_pivots],  dtype=float)
+    ry = np.array([p[1] for p in resist_pivots],  dtype=float)
+    sx = np.array([p[0] for p in support_pivots], dtype=float)
+    sy = np.array([p[1] for p in support_pivots], dtype=float)
+
+    # Pivot span must be in [MIN_SPAN, MAX_SPAN]
+    pivot_span = max(rx[-1], sx[-1]) - min(rx[0], sx[0])
+    if pivot_span < ASCTRI_MIN_SPAN_BARS or pivot_span > ASCTRI_MAX_SPAN_BARS:
+        return _empty
+
+    r_slope, r_intercept = np.polyfit(rx, ry, 1)
+    s_slope, s_intercept = np.polyfit(sx, sy, 1)
+
+    current_close = float(sl["Close"].iloc[-1])
+    if current_close <= 0:
+        return _empty
+
+    # R² quality gate for support line
+    def _r2(x: np.ndarray, y: np.ndarray, slope: float, intercept: float) -> float:
+        y_pred = slope * x + intercept
+        ss_res = float(np.sum((y - y_pred) ** 2))
+        ss_tot = float(np.sum((y - y.mean()) ** 2))
+        if ss_tot == 0.0:
+            return 1.0 if ss_res == 0.0 else 0.0
+        return 1.0 - ss_res / ss_tot
+
+    if _r2(sx, sy, s_slope, s_intercept) < ASCTRI_SUPPORT_R2:
+        return _empty
+
+    # Resistance must be near-flat: |slope| < threshold
+    if abs(r_slope) / current_close > ASCTRI_RESIST_MAX_SLOPE_PCT:
+        return _empty
+
+    # Support must be clearly ascending
+    if s_slope / current_close < ASCTRI_SUPPORT_MIN_SLOPE_PCT:
+        return _empty
+
+    # Resistance must not be declining (flat or very slightly rising only)
+    if r_slope < 0:
+        return _empty
+
+    # Lines must be converging: support rising toward flat resistance
+    last_x = float(n - 1)
+    first_x = min(rx[0], sx[0])
+    resist_now   = r_slope * last_x + r_intercept
+    support_now  = s_slope * last_x + s_intercept
+    resist_start = r_slope * first_x + r_intercept
+    support_start = s_slope * first_x + s_intercept
+
+    width_first = resist_start - support_start
+    width_last  = resist_now  - support_now
+    if width_first <= 0 or width_last >= width_first:
+        return _empty
+
+    # Width must still be meaningful (not already at the apex)
+    if width_last < current_close * 0.005:
+        return _empty
+
+    # Current price must be inside the triangle
+    if not (support_now <= current_close <= resist_now):
+        return _empty
+
+    # RSI context filter (applied when rsi column is available)
+    if "rsi" in sl.columns:
+        current_rsi = float(sl["rsi"].iloc[-1])
+        if not np.isnan(current_rsi) and not (ASCTRI_RSI_MIN <= current_rsi <= ASCTRI_RSI_MAX):
+            return _empty
+
+    # Volume declining over the formation
+    vol_arr = sl["Volume"].to_numpy(dtype=float)
+    vol_x   = np.arange(n, dtype=float)
+    vol_slope, _ = np.polyfit(vol_x, vol_arr, 1)
+    if vol_slope >= 0:
+        return _empty
+
+    vol_window  = max(5, min(10, n // 4))
+    vol_start   = float(sl["Volume"].iloc[:vol_window].mean())
+    vol_end     = float(sl["Volume"].iloc[-vol_window:].mean())
+    if vol_start > 0 and vol_end / vol_start >= ASCTRI_VOL_END_RATIO:
+        return _empty
+
+    # OBV net non-negative (accumulation, not distribution)
+    close_arr  = sl["Close"].to_numpy(dtype=float)
+    close_diff = np.diff(close_arr)
+    signed_vol = np.where(close_diff > 0, vol_arr[1:],
+                 np.where(close_diff < 0, -vol_arr[1:], 0.0))
+    obv        = np.concatenate([[0.0], np.cumsum(signed_vol)])
+    obv_x      = np.arange(n, dtype=float)
+    obv_slope, _ = np.polyfit(obv_x, obv, 1)
+    avg_vol = float(np.mean(vol_arr)) + 1e-6
+    # Reject if OBV is losing more than 30% of average daily volume per bar
+    if obv_slope / avg_vol < -0.30:
+        return _empty
+
+    return dict(
+        detected=True,
+        resist_slope=float(r_slope),
+        resist_intercept=float(r_intercept),
+        support_slope=float(s_slope),
+        support_intercept=float(s_intercept),
+        resist_pivots=[(int(i), float(y)) for i, y in zip(rx, ry)],
+        support_pivots=[(int(i), float(y)) for i, y in zip(sx, sy)],
+        n_slice=n,
+    )
