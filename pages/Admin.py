@@ -7,11 +7,8 @@ import re
 import streamlit as st
 from pathlib import Path
 
-from ui.components import inject_css
 from ui.sidebar import render_data_management
 import config as _cfg
-
-inject_css()
 
 with st.sidebar:
     render_data_management()

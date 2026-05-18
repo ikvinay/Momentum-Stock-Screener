@@ -5,7 +5,7 @@ Stocks page — NSE Market Insights, IPO Setups, Performance Tracker.
 import streamlit as st
 
 from ui.components import (
-    inject_css, tick, colour_pct, colour_rsi, colour_rmv, colour_rs, colour_ret, colour_float,
+    tick, colour_pct, colour_rsi, colour_rmv, colour_rs, colour_ret, colour_float,
     render_stock_chart, render_top_stocks, render_ipo_section, render_rrg_chart,
     DISPLAY_COLS_HEAD, DISPLAY_COLS_TAIL, STYLE_COLS, NUM_FORMAT,
     TRACKER_BASE_COLS, TRACKER_NUM_FORMAT,
@@ -23,8 +23,6 @@ from config import (
 
 import pandas as pd
 
-inject_css()
-
 # ---------------------------------------------------------------------------
 # Sidebar
 # ---------------------------------------------------------------------------
@@ -36,7 +34,7 @@ min_score    = filters["min_score"]
 min_rs          = filters["min_rs"]
 rsi_range       = filters["rsi_range"]
 max_rmv         = filters["max_rmv"]
-min_float       = filters["min_float"]
+max_float       = filters["max_float"]
 cap_min         = filters["cap_min"]
 cap_max         = filters["cap_max"]
 
@@ -102,6 +100,43 @@ def _render_highlights(results, sector_indices):
         return
     medals = ["#1", "#2", "#3", "#4", "#5"]
     st.markdown("### Market Highlights")
+
+    # ── Sector Highlights ─────────────────────────────────────────────────────
+    st.markdown("**Sector Highlights**")
+    _sh_ok = all(c in results.columns for c in ["Sector", "Monthly %", "Quarterly %"])
+    if _sh_ok:
+        _sh = results[results["Sector"].notna() & (results["Sector"] != "Unknown")]
+        _sector_stats = (
+            _sh.groupby("Sector")
+            .agg(
+                avg_1m=("Monthly %", "mean"),
+                avg_3m=("Quarterly %", "mean"),
+                n_stocks=("Symbol", "count"),
+            )
+            .reset_index()
+        )
+        _sector_stats["blended"] = (_sector_stats["avg_1m"] + _sector_stats["avg_3m"]) / 2
+        _sector_stats = _sector_stats.sort_values("blended", ascending=False).head(5).reset_index(drop=True)
+        if not _sector_stats.empty:
+            sh_cols = st.columns(len(_sector_stats))
+            for i, srow in _sector_stats.iterrows():
+                b  = srow["blended"]
+                m  = srow["avg_1m"]
+                q  = srow["avg_3m"]
+                sh_cols[i].metric(
+                    label=f"{medals[i]} {srow['Sector']}  ·  {int(srow['n_stocks'])} stocks",
+                    value=f"{'+'if b>=0 else ''}{b:.1f}%  avg",
+                    delta=f"1M {'+'if m>=0 else ''}{m:.1f}%  ·  3M {'+'if q>=0 else ''}{q:.1f}%",
+                    delta_color="normal" if b >= 0 else "inverse",
+                )
+        else:
+            st.info("No sector data available.")
+    else:
+        st.info("Run the screener to see sector highlights.")
+
+    st.markdown("<div style='margin-bottom:4px;'></div>", unsafe_allow_html=True)
+
+    # ── Top Industries vs their Sector ────────────────────────────────────────
     st.markdown("**Top Industries vs their Sector**")
     top_inds = top_industries_vs_sector(results, sector_indices, top_n=5)
     if top_inds:
@@ -170,8 +205,8 @@ with tab_screen:
             df = df[(df["Market Cap (Cr)"] >= cap_min) & (df["Market Cap (Cr)"] <= cap_max)]
         if "RSI" in df.columns:
             df = df[df["RSI"].isna() | ((df["RSI"] >= rsi_range[0]) & (df["RSI"] <= rsi_range[1]))]
-        if "Free Float %" in df.columns and min_float > 0:
-            df = df[df["Free Float %"].notna() & (df["Free Float %"] >= min_float)]
+        if "Free Float %" in df.columns and max_float < 100:
+            df = df[df["Free Float %"].notna() & (df["Free Float %"] <= max_float)]
 
         if df.empty:
             st.info("No stocks match the current filters.")
@@ -484,6 +519,26 @@ with tab_track:
 with tab_rrg:
     from src.rrg import compute_rrg
     from src.index_screener import load_index_ohlcv
+    from src.data_fetcher import load_price_data as _lpd
+    from config import NSE_INDEX_TICKERS, SECTOR_INDEX_MAP
+
+    # ── Build index display-name → sector-name mapping ────────────────────────
+    _ticker_to_sector = {v: k for k, v in SECTOR_INDEX_MAP.items()}
+    _index_to_sector: dict[str, str] = {}
+    for _cat, _entries in NSE_INDEX_TICKERS.items():
+        for _iname, _iticker in _entries.items():
+            _frag = _ticker_to_sector.get(_iticker)
+            if _frag:
+                _index_to_sector[_iname] = _frag
+
+    def _resolve_sector_for_index(index_display_name: str) -> str | None:
+        frag = _index_to_sector.get(index_display_name, "").lower()
+        if not frag or results is None or results.empty:
+            return None
+        for s in results["Sector"].dropna().unique():
+            if frag in s.lower() or s.lower() in frag:
+                return s
+        return None
 
     index_ohlcv   = load_index_ohlcv()
     rrg_benchmark = (
@@ -497,196 +552,335 @@ with tab_rrg:
             "then **🔍 Run Screener** in the sidebar."
         )
     else:
-        # --- Explanation banner ---
-        st.markdown(
-            "<div style='background:rgba(255,255,255,0.04);border-radius:8px;"
-            "padding:10px 16px;font-size:0.83rem;color:#94a3b8;margin-bottom:14px'>"
-            "Each point is an NSE sector / thematic index plotted against "
-            "<b style='color:#e2e8f0'>Nifty 500</b> on two axes: "
-            "<b style='color:#e2e8f0'>RS-Ratio</b> (outperforming vs underperforming) and "
-            "<b style='color:#e2e8f0'>RS-Momentum</b> (accelerating vs decelerating). "
-            "The tail shows the last N periods of movement. "
-            "Normal rotation is clockwise: "
-            "<span style='color:#60a5fa'>Improving</span> → "
-            "<span style='color:#22c55e'>Leading</span> → "
-            "<span style='color:#f59e0b'>Weakening</span> → "
-            "<span style='color:#ef4444'>Lagging</span>."
-            "</div>",
-            unsafe_allow_html=True,
-        )
+        _Q_ORDER = {"Leading": 0, "Improving": 1, "Weakening": 2, "Lagging": 3}
+        _Q_STYLE = {
+            "Leading":   ("#22c55e", "rgba(34,197,94,0.08)"),
+            "Improving": ("#60a5fa", "rgba(96,165,250,0.08)"),
+            "Weakening": ("#f59e0b", "rgba(245,158,11,0.08)"),
+            "Lagging":   ("#ef4444", "rgba(239,68,68,0.08)"),
+        }
 
-        # --- Parameters ---
-        pc1, pc2, pc3, _ = st.columns([1, 1, 1, 4])
-        with pc1:
-            rrg_m    = st.number_input("EMA Window (m)", 5, 30, 14, 1, key="rrg_m")
-        with pc2:
-            rrg_k    = st.number_input("ROC Period (k)", 3, 20, 10, 1, key="rrg_k")
-        with pc3:
-            rrg_tail = st.number_input("Trail Length",   3, 16,  8, 1, key="rrg_tail")
+        def _color_quadrant(val):
+            c = {"Leading": "#22c55e", "Improving": "#60a5fa",
+                 "Weakening": "#f59e0b", "Lagging": "#ef4444"}.get(val, "")
+            return f"color: {c}" if c else ""
 
-        st.write("")
+        def _synthetic_df(symbols: list[str], all_pd: dict) -> pd.DataFrame | None:
+            closes = [
+                all_pd[f"{s}.NS"]["Close"].rename(s)
+                for s in symbols
+                if f"{s}.NS" in all_pd and "Close" in all_pd[f"{s}.NS"].columns
+            ]
+            if not closes:
+                return None
+            df = pd.concat(closes, axis=1).dropna(how="all")
+            return pd.DataFrame({"Close": df.mean(axis=1)}) if not df.empty else None
 
-        # --- Shared render function (called by both Daily and Weekly sub-tabs) ---
-        def _render_rrg_level(weekly: bool, suffix: str) -> None:
-            label = "Weekly" if weekly else "Daily"
-
-            with st.spinner(f"Computing {label} RRG for {len(index_ohlcv)} sector indices…"):
-                sector_rrg = compute_rrg(
-                    index_ohlcv, rrg_benchmark,
-                    m=rrg_m, k=rrg_k, tail=rrg_tail, weekly=weekly,
-                )
-
-            if sector_rrg.empty:
-                st.info(
-                    f"Not enough history to render the {label} RRG. "
-                    "Try reducing EMA Window or ROC Period, or run Fetch Data first."
-                )
-                return
-
-            # Quadrant summary badges
-            q_counts = sector_rrg["quadrant"].value_counts()
-            bc1, bc2, bc3, bc4 = st.columns(4)
-            for col, qname, color in [
-                (bc1, "Leading",   "#22c55e"),
-                (bc2, "Improving", "#60a5fa"),
-                (bc3, "Weakening", "#f59e0b"),
-                (bc4, "Lagging",   "#ef4444"),
-            ]:
-                n = q_counts.get(qname, 0)
+        def _quadrant_badges(rrg_df: pd.DataFrame) -> None:
+            qb1, qb2, qb3, qb4 = st.columns(4)
+            for col, qname in [(qb1, "Leading"), (qb2, "Improving"),
+                               (qb3, "Weakening"), (qb4, "Lagging")]:
+                color, bg = _Q_STYLE[qname]
+                in_q  = rrg_df[rrg_df["quadrant"] == qname]["name"].tolist()
+                names_str = "  ·  ".join(in_q) if in_q else "—"
                 col.markdown(
-                    f"<div style='text-align:center;padding:8px 4px;"
-                    f"background:rgba(255,255,255,0.04);border-radius:6px;"
-                    f"border-top:2px solid {color}'>"
-                    f"<div style='font-size:1.5rem;font-weight:800;color:{color}'>{n}</div>"
-                    f"<div style='font-size:0.72rem;color:#94a3b8;letter-spacing:0.04em'>{qname}</div>"
+                    f"<div style='padding:10px 12px;background:{bg};border-radius:8px;"
+                    f"border-top:2px solid {color};min-height:76px'>"
+                    f"<div style='display:flex;align-items:baseline;gap:8px;margin-bottom:4px'>"
+                    f"<span style='font-size:1.4rem;font-weight:800;color:{color}'>{len(in_q)}</span>"
+                    f"<span style='font-size:0.72rem;font-weight:600;color:{color};"
+                    f"letter-spacing:0.06em;text-transform:uppercase'>{qname}</span></div>"
+                    f"<div style='font-size:0.72rem;color:#94a3b8;line-height:1.5'>{names_str}</div>"
                     f"</div>",
                     unsafe_allow_html=True,
                 )
-            st.write("")
 
-            # Sector RRG chart
-            render_rrg_chart(
-                sector_rrg,
-                title=f"NSE Sector Indices vs Nifty 500 — {label}",
-            )
-
-            # Summary table sorted by quadrant priority then RS-Ratio desc
-            _Q_ORDER = {"Leading": 0, "Improving": 1, "Weakening": 2, "Lagging": 3}
-            tbl = sector_rrg[["name", "rs_ratio", "rs_momentum", "quadrant"]].copy()
+        def _detail_table(rrg_df: pd.DataFrame, col_label: str) -> None:
+            tbl = rrg_df[["name", "rs_ratio", "rs_momentum", "quadrant"]].copy()
             tbl["_q"] = tbl["quadrant"].map(_Q_ORDER)
             tbl = (tbl.sort_values(["_q", "rs_ratio"], ascending=[True, False])
                    .drop(columns=["_q"]).reset_index(drop=True))
-            tbl.columns = ["Index / Sector", "RS-Ratio", "RS-Momentum", "Quadrant"]
+            tbl.columns = [col_label, "RS-Ratio", "RS-Momentum", "Quadrant"]
             st.dataframe(
-                tbl.style.format({"RS-Ratio": "{:.2f}", "RS-Momentum": "{:.2f}"}),
+                tbl.style
+                   .format({"RS-Ratio": "{:.2f}", "RS-Momentum": "{:.2f}"})
+                   .map(_color_quadrant, subset=["Quadrant"]),
                 use_container_width=True, hide_index=True,
-                height=min(38 * (len(tbl) + 1), 380),
+                height=min(38 * (len(tbl) + 1), 400),
             )
 
-            # ── Stock drill-down ──────────────────────────────────────────────
-            st.divider()
-            st.markdown("#### Drill Down — Stocks within a Sector")
-            st.caption(
-                "Select a yfinance sector to plot its constituent stocks on an RRG "
-                "vs Nifty 500. Use the sector index chart above as a guide to which "
-                "sectors are Leading or Improving."
-            )
+        def _render_rrg_view(weekly: bool, rrg_m: int, rrg_k: int, rrg_tail: int, freq_key: str) -> None:
+            _freq_label = "Weekly" if weekly else "Daily"
+            _path_key   = f"rrg_path_{freq_key}"
+            if _path_key not in st.session_state:
+                st.session_state[_path_key] = [
+                    {"label": "Indices", "level": 0, "sector": None, "industry": None}
+                ]
 
-            if results is None or results.empty or "Sector" not in results.columns:
-                st.info("Run the screener first to enable stock-level drill-down.")
-                return
+            path  = st.session_state[_path_key]
+            level = path[-1]["level"]
 
-            sectors_avail = sorted(results["Sector"].dropna().unique().tolist())
-            sel_sector = st.selectbox(
-                "Select sector",
-                ["— pick a sector —"] + sectors_avail,
-                key=f"rrg_sector_{suffix}",
-            )
-            if sel_sector == "— pick a sector —":
-                return
-
-            # Build {company_name: OHLCV} for stocks in this sector
-            from src.data_fetcher import load_price_data as _lpd
-            with st.spinner("Loading price data for drill-down…"):
-                all_pd = _lpd()
-
-            if not all_pd:
-                st.warning("Price data not available — run **Fetch Data** first.")
-                return
-
-            sector_rows = results[results["Sector"] == sel_sector]
-            sym_to_label = {
-                f"{r['Symbol']}.NS": r.get("Company", r["Symbol"])
-                for _, r in sector_rows.iterrows()
-            }
-            sector_pd = {
-                sym_to_label[t]: all_pd[t]
-                for t in sym_to_label
-                if t in all_pd
-            }
-
-            if not sector_pd:
-                st.info(f"No price data found for stocks in **{sel_sector}**.")
-                return
-
-            with st.spinner(
-                f"Computing {label} RRG for {len(sector_pd)} stocks in {sel_sector}…"
-            ):
-                stock_rrg = compute_rrg(
-                    sector_pd, rrg_benchmark,
-                    m=rrg_m, k=rrg_k, tail=rrg_tail, weekly=weekly,
-                )
-
-            if stock_rrg.empty:
-                st.info(
-                    f"Not enough price history for a {label} stock RRG in {sel_sector}. "
-                    "Try switching to Daily or reducing EMA/ROC parameters."
-                )
-                return
-
-            q2 = stock_rrg["quadrant"].value_counts()
-            sc1, sc2, sc3, sc4 = st.columns(4)
-            for col, qname, color in [
-                (sc1, "Leading",   "#22c55e"),
-                (sc2, "Improving", "#60a5fa"),
-                (sc3, "Weakening", "#f59e0b"),
-                (sc4, "Lagging",   "#ef4444"),
-            ]:
-                col.markdown(
-                    f"<div style='text-align:center;padding:6px 4px;"
-                    f"background:rgba(255,255,255,0.04);border-radius:6px;"
-                    f"border-top:2px solid {color}'>"
-                    f"<div style='font-size:1.3rem;font-weight:700;color:{color}'>{q2.get(qname, 0)}</div>"
-                    f"<div style='font-size:0.72rem;color:#94a3b8'>{qname}</div>"
-                    f"</div>",
+            # ── Breadcrumb ────────────────────────────────────────────────────
+            bc_left, bc_right = st.columns([9, 1])
+            with bc_left:
+                _level_hint = {0: "click a dot to drill → Sectors",
+                               1: "click a dot to drill → Industries",
+                               2: "click a dot to drill → Stocks",
+                               3: ""}
+                crumb_parts = []
+                for i, crumb in enumerate(path):
+                    is_last = (i == len(path) - 1)
+                    if is_last:
+                        hint = _level_hint.get(level, "")
+                        crumb_parts.append(
+                            f'<span style="color:#f1f5f9;font-weight:600">{crumb["label"]}</span>'
+                            + (f'<span style="font-size:0.72rem;color:#64748b;margin-left:10px">'
+                               f'{hint}</span>' if hint else "")
+                        )
+                    else:
+                        crumb_parts.append(
+                            f'<span style="color:#60a5fa">{crumb["label"]}</span>'
+                        )
+                st.markdown(
+                    '<div style="font-size:0.9rem;padding:6px 0">'
+                    + ' <span style="color:#475569">›</span> '.join(crumb_parts)
+                    + "</div>",
                     unsafe_allow_html=True,
                 )
+            with bc_right:
+                if len(path) > 1 and st.button("↑ Back", key=f"rrg_back_{freq_key}",
+                                                use_container_width=True):
+                    st.session_state[_path_key] = path[:-1]
+                    st.rerun()
+
+            if len(path) > 2:
+                anc_cols = st.columns(len(path) - 1)
+                for i, crumb in enumerate(path[:-1]):
+                    if anc_cols[i].button(f"← {crumb['label']}",
+                                          key=f"rrg_crumb_{freq_key}_{i}",
+                                          use_container_width=True):
+                        st.session_state[_path_key] = path[:i + 1]
+                        st.rerun()
+
+            # ── Search / jump box ─────────────────────────────────────────────
+            if results is not None and not results.empty:
+                _all_sectors_j    = sorted(results["Sector"].dropna().unique().tolist())
+                _all_industries_j = sorted(results["Industry"].dropna().unique().tolist())
+                _jump_opts = ([""] +
+                    [f"📊 {s}" for s in _all_sectors_j] +
+                    [f"🏭 {i}" for i in _all_industries_j])
+                _jump = st.selectbox(
+                    "jump", _jump_opts, key=f"rrg_jump_{freq_key}",
+                    label_visibility="collapsed",
+                    placeholder="🔍 Jump to any sector or industry…",
+                )
+                if _jump:
+                    if _jump.startswith("📊 "):
+                        _sec = _jump[2:].strip()
+                        st.session_state[_path_key] = [
+                            {"label": "Indices", "level": 0, "sector": None, "industry": None},
+                            {"label": "Sectors", "level": 1, "sector": _sec, "industry": None},
+                            {"label": _sec,      "level": 2, "sector": _sec, "industry": None},
+                        ]
+                    elif _jump.startswith("🏭 "):
+                        _ind = _jump[2:].strip()
+                        _ind_sec = results[results["Industry"] == _ind]["Sector"].mode()
+                        _ind_sec = _ind_sec.iloc[0] if not _ind_sec.empty else "Unknown"
+                        st.session_state[_path_key] = [
+                            {"label": "Indices", "level": 0, "sector": None,     "industry": None},
+                            {"label": "Sectors", "level": 1, "sector": _ind_sec, "industry": None},
+                            {"label": _ind_sec,  "level": 2, "sector": _ind_sec, "industry": None},
+                            {"label": _ind,      "level": 3, "sector": _ind_sec, "industry": _ind},
+                        ]
+                    st.rerun()
+
             st.write("")
 
-            render_rrg_chart(
-                stock_rrg,
-                title=f"{sel_sector} — Stocks vs Nifty 500 · {label}  ({len(stock_rrg)} stocks)",
+            # ── Build price_dict for the current level ────────────────────────
+            if level == 0:
+                price_dict  = index_ohlcv
+                can_drill   = True
+                chart_title = f"NSE Sector Indices vs Nifty 500 — {_freq_label}"
+                col_label   = "Index"
+
+            elif level == 1:
+                price_dict  = {}
+                can_drill   = True
+                chart_title = f"Sectors (synthetic) vs Nifty 500 — {_freq_label}"
+                col_label   = "Sector"
+                if results is not None and not results.empty:
+                    with st.spinner("Building sector series…"):
+                        _all_pd = _lpd() or {}
+                    for _sec, _grp in results.groupby("Sector"):
+                        if not _sec or _sec == "Unknown":
+                            continue
+                        _sdf = _synthetic_df(_grp["Symbol"].tolist(), _all_pd)
+                        if _sdf is not None and len(_sdf) >= 50:
+                            price_dict[_sec] = _sdf
+
+            elif level == 2:
+                _sec = path[-1]["sector"]
+                price_dict  = {}
+                can_drill   = True
+                chart_title = f"{_sec} — Industries vs Nifty 500 · {_freq_label}"
+                col_label   = "Industry"
+                if results is not None and not results.empty and _sec:
+                    with st.spinner("Building industry series…"):
+                        _all_pd = _lpd() or {}
+                    for _ind, _grp in results[results["Sector"] == _sec].groupby("Industry"):
+                        if not _ind or _ind == "Unknown":
+                            continue
+                        _sdf = _synthetic_df(_grp["Symbol"].tolist(), _all_pd)
+                        if _sdf is not None and len(_sdf) >= 50:
+                            price_dict[_ind] = _sdf
+
+            elif level == 3:
+                _sec = path[-1]["sector"]
+                _ind = path[-1]["industry"]
+                price_dict  = {}
+                can_drill   = False
+                chart_title = f"{_ind} — Stocks vs Nifty 500 · {_freq_label}"
+                col_label   = "Stock"
+                if results is not None and not results.empty:
+                    with st.spinner("Loading price data…"):
+                        _all_pd = _lpd() or {}
+                    _mask = results["Industry"] == _ind
+                    if _sec:
+                        _mask &= results["Sector"] == _sec
+                    for _, _row in results[_mask].iterrows():
+                        _t = f"{_row['Symbol']}.NS"
+                        if _t in _all_pd:
+                            price_dict[_row.get("Company", _row["Symbol"])] = _all_pd[_t]
+            else:
+                price_dict  = {}
+                can_drill   = False
+                chart_title = "RRG"
+                col_label   = "Name"
+
+            # ── Compute & render RRG ──────────────────────────────────────────
+            if not price_dict:
+                st.info("No data available at this level. Navigate back or run the screener first.")
+            else:
+                with st.spinner(f"Computing {_freq_label} RRG — {len(price_dict)} items…"):
+                    rrg_df = compute_rrg(
+                        price_dict, rrg_benchmark,
+                        m=rrg_m, k=rrg_k, tail=rrg_tail, weekly=weekly,
+                    )
+
+                if rrg_df.empty:
+                    st.info(
+                        f"Not enough history to render the {_freq_label} RRG at this level. "
+                        "Try Daily mode or navigate back."
+                    )
+                else:
+                    if level == 1 and path[-1].get("sector"):
+                        _hint_sec = path[-1]["sector"]
+                        if _hint_sec in set(rrg_df["name"]):
+                            st.caption(
+                                f"💡 You came from an index in **{_hint_sec}** — "
+                                "click that sector to drill into its industries."
+                            )
+
+                    _quadrant_badges(rrg_df)
+                    if can_drill:
+                        st.caption("Click any dot on the chart to drill down.")
+                    st.write("")
+
+                    _chart_key = f"rrg_{freq_key}_" + "_".join(str(p["level"]) for p in path)
+                    _event = render_rrg_chart(
+                        rrg_df,
+                        title=chart_title,
+                        key=_chart_key,
+                        on_select="rerun" if can_drill else "ignore",
+                    )
+
+                    if can_drill and _event is not None:
+                        _pts = getattr(getattr(_event, "selection", None), "points", None)
+                        if _pts:
+                            _clicked = _pts[0].get("customdata", [None])[0]
+                            if _clicked:
+                                if level == 0:
+                                    _matched_sec = _resolve_sector_for_index(_clicked)
+                                    st.session_state[_path_key] = path + [{
+                                        "label":    "Sectors",
+                                        "level":    1,
+                                        "sector":   _matched_sec,
+                                        "industry": None,
+                                    }]
+                                elif level == 1:
+                                    st.session_state[_path_key] = path + [{
+                                        "label":    _clicked,
+                                        "level":    2,
+                                        "sector":   _clicked,
+                                        "industry": None,
+                                    }]
+                                elif level == 2:
+                                    st.session_state[_path_key] = path + [{
+                                        "label":    _clicked,
+                                        "level":    3,
+                                        "sector":   path[-1]["sector"],
+                                        "industry": _clicked,
+                                    }]
+                                st.rerun()
+
+                    with st.expander("Detail table"):
+                        _detail_table(rrg_df, col_label)
+
+                    with st.expander("How to read the RRG"):
+                        st.markdown(
+                            "**RS-Ratio** (x-axis) — outperforming Nifty 500 (>100) or underperforming (<100)  \n"
+                            "**RS-Momentum** (y-axis) — that outperformance accelerating (>100) or fading (<100)  \n\n"
+                            "Normal rotation is **clockwise**: "
+                            ":blue[Improving] → :green[Leading] → :orange[Weakening] → :red[Lagging]  \n"
+                            "**Actionable**: Leading (hold/add) · Improving (early entry, tail curling up-right)"
+                        )
+
+        # ── Timeframe tabs ────────────────────────────────────────────────────
+        rrg_tab_daily, rrg_tab_weekly = st.tabs(["  Daily  ", "  Weekly  "])
+
+        with rrg_tab_daily:
+            _def_m, _def_k, _def_tail = 14, 10, 4
+            with st.expander("Advanced settings"):
+                _ac1, _ac2, _ac3 = st.columns(3)
+                rrg_m = _ac1.number_input(
+                    "EMA Smoothing", 5, 30, _def_m, 1, key="rrg_m_daily",
+                    help="Smoothing window for RS-Ratio / RS-Momentum. Daily default: 14.",
+                )
+                rrg_k = _ac2.number_input(
+                    "RS Period", 3, 30, _def_k, 1, key="rrg_k_daily",
+                    help="Look-back for relative-strength vs benchmark. Daily default: 10.",
+                )
+                rrg_tail = _ac3.number_input(
+                    "Trail Length", 3, 16, _def_tail, 1, key="rrg_tail_daily",
+                    help="Number of past periods shown as a tail. Daily default: 4.",
+                )
+            _render_rrg_view(
+                weekly=False,
+                rrg_m=int(rrg_m), rrg_k=int(rrg_k), rrg_tail=int(rrg_tail),
+                freq_key="daily",
             )
 
-            stbl = stock_rrg[["name", "rs_ratio", "rs_momentum", "quadrant"]].copy()
-            stbl["_q"] = stbl["quadrant"].map(_Q_ORDER)
-            stbl = (stbl.sort_values(["_q", "rs_ratio"], ascending=[True, False])
-                    .drop(columns=["_q"]).reset_index(drop=True))
-            stbl.columns = ["Stock", "RS-Ratio", "RS-Momentum", "Quadrant"]
-            st.dataframe(
-                stbl.style.format({"RS-Ratio": "{:.2f}", "RS-Momentum": "{:.2f}"}),
-                use_container_width=True, hide_index=True,
-                height=min(38 * (len(stbl) + 1), 450),
+        with rrg_tab_weekly:
+            _def_m, _def_k, _def_tail = 14, 10, 4
+            with st.expander("Advanced settings"):
+                _ac1, _ac2, _ac3 = st.columns(3)
+                rrg_m = _ac1.number_input(
+                    "EMA Smoothing", 5, 30, _def_m, 1, key="rrg_m_weekly",
+                    help="Smoothing window for RS-Ratio / RS-Momentum. Weekly default: 14.",
+                )
+                rrg_k = _ac2.number_input(
+                    "RS Period", 3, 30, _def_k, 1, key="rrg_k_weekly",
+                    help="Look-back for relative-strength vs benchmark. Weekly default: 10.",
+                )
+                rrg_tail = _ac3.number_input(
+                    "Trail Length", 3, 16, _def_tail, 1, key="rrg_tail_weekly",
+                    help="Number of past periods shown as a tail. Weekly default: 4.",
+                )
+            _render_rrg_view(
+                weekly=True,
+                rrg_m=int(rrg_m), rrg_k=int(rrg_k), rrg_tail=int(rrg_tail),
+                freq_key="weekly",
             )
-
-        # Daily / Weekly sub-tabs
-        day_tab, week_tab = st.tabs(["  Daily  ", "  Weekly  "])
-
-        with day_tab:
-            _render_rrg_level(weekly=False, suffix="day")
-
-        with week_tab:
-            _render_rrg_level(weekly=True, suffix="week")
 
 
 st.caption(

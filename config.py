@@ -107,39 +107,27 @@ COMBINED_RANK_WEIGHTS = {
 
 # NSE sector index tickers (yfinance) keyed by lowercase fragment of sector name
 SECTOR_INDEX_MAP = {
-    "financial services": "^NSEBANK",
-    "bank":               "^NSEBANK",
-    "financial":          "^NSEBANK",
-    "technology":         "^CNXIT",
-    "software":           "^CNXIT",
-    "information technology": "^CNXIT",
-    "healthcare":         "^CNXPHARMA",
-    "pharmaceutical":     "^CNXPHARMA",
-    "pharma":             "^CNXPHARMA",
-    "drug":               "^CNXPHARMA",
-    "consumer defensive": "^CNXFMCG",
-    "consumer staples":   "^CNXFMCG",
-    "fmcg":               "^CNXFMCG",
-    "basic materials":    "^CNXMETAL",
-    "metal":              "^CNXMETAL",
-    "mining":             "^CNXMETAL",
-    "energy":             "^CNXENERGY",
-    "oil":                "^CNXENERGY",
-    "gas":                "^CNXENERGY",
-    "power":              "^CNXENERGY",
-    "real estate":        "^CNXREALTY",
-    "realty":             "^CNXREALTY",
-    "industrials":        "^CNXINFRA",
-    "infrastructure":     "^CNXINFRA",
-    "capital goods":      "^CNXINFRA",
-    "communication":      "^CNXMEDIA",
-    "media":              "^CNXMEDIA",
-    "telecom":            "^CNXMEDIA",
-    "consumer cyclical":  "^CNXAUTO",
-    "automobile":         "^CNXAUTO",
-    "auto":               "^CNXAUTO",
-    "utility":            "^CNXENERGY",
-    "utilities":          "^CNXENERGY",
+    "financial services":            "^NSEBANK",
+    "information technology":        "^CNXIT",
+    "pharmaceuticals & healthcare":  "^CNXPHARMA",
+    "fmcg & consumer staples":       "^CNXFMCG",
+    "consumer discretionary":        "^CNXAUTO",
+    "automobile & auto ancillaries": "^CNXAUTO",
+    "metals & mining":               "^CNXMETAL",
+    "oil, gas & energy":             "^CNXENERGY",
+    "power & utilities":             "^CNXENERGY",
+    "infrastructure & capital goods":"^CNXINFRA",
+    "cement & building materials":   "^CNXINFRA",
+    "real estate":                   "^CNXREALTY",
+    "chemicals":                     "^CNXMETAL",
+    "telecom":                       "^CNXMEDIA",
+    "media & entertainment":         "^CNXMEDIA",
+    "textiles":                      "^NSEI",
+    "logistics & transportation":    "^NSEI",
+    "defence & aerospace":           "^CNXINFRA",
+    "hospitality & tourism":         "^NSEI",
+    "agriculture & agri inputs":     "^NSEI",
+    "diversified conglomerates":     "^NSEI",
 }
 
 DEFAULT_SECTOR_INDEX = "^NSEI"  # Nifty 50 fallback
@@ -374,6 +362,143 @@ COMMODITY_SNAPSHOTS_FILE  = os.path.join(DATA_DIR, "commodity_snapshots.pkl")
 # Scheduler: commodity refresh at 23:45 IST (after MCX closes at 23:30)
 COMMODITY_REFRESH_HOUR_IST   = 23
 COMMODITY_REFRESH_MINUTE_IST = 45
+
+# ---------------------------------------------------------------------------
+# NSE Sector Map cache
+# Maps NSE macro → yfinance-style sector name (used to fix "Unknown" sectors)
+# ---------------------------------------------------------------------------
+
+NSE_SECTOR_MAP_FILE  = os.path.join(DATA_DIR, "nse_sector_map.pkl")
+NSE_SECTOR_CACHE_DAYS = 30  # sector classification rarely changes
+
+NSE_MACRO_TO_SECTOR: dict[str, str] = {
+    "Financial Services":              "Financial Services",
+    "Consumer Discretionary":          "Consumer Cyclical",
+    "Consumer Goods":                  "Consumer Defensive",
+    "Fast Moving Consumer Goods":      "Consumer Defensive",
+    "Healthcare":                      "Healthcare",
+    "Industrials":                     "Industrials",
+    "Information Technology":          "Technology",
+    "Commodities":                     "Basic Materials",
+    "Energy":                          "Energy",
+    "Real Estate":                     "Real Estate",
+    "Services":                        "Communication Services",
+    "Communication Services":          "Communication Services",
+    "Utilities":                       "Utilities",
+    "Diversified":                     "Industrials",
+    "Construction":                    "Industrials",
+    "Chemicals":                       "Basic Materials",
+    "Textile":                         "Consumer Cyclical",
+    "Forest Materials":                "Basic Materials",
+    "Consumer Services":               "Consumer Cyclical",
+    "Media Entertainment & Publication": "Communication Services",
+}
+
+# NSE industry-level → display sector name.
+# Derived from NSE's quote-equity industryInfo.industry field.
+# Takes precedence over NSE_MACRO_TO_SECTOR during enrichment.
+NSE_INDUSTRY_TO_SECTOR: dict[str, str] = {
+    # Financial Services
+    "Banks":                                         "Financial Services",
+    "Finance":                                       "Financial Services",
+    "Insurance":                                     "Financial Services",
+    "Capital Markets":                               "Financial Services",
+    "Financial Technology (Fintech)":                "Financial Services",
+
+    # Information Technology
+    "IT - Software":                                 "Information Technology",
+    "IT - Services":                                 "Information Technology",
+    "IT - Hardware":                                 "Information Technology",
+
+    # Pharmaceuticals & Healthcare
+    "Pharmaceuticals & Biotechnology":               "Pharmaceuticals & Healthcare",
+    "Healthcare Services":                           "Pharmaceuticals & Healthcare",
+    "Healthcare Equipment & Supplies":               "Pharmaceuticals & Healthcare",
+
+    # FMCG & Consumer Staples
+    "Diversified FMCG":                              "FMCG & Consumer Staples",
+    "Food Products":                                 "FMCG & Consumer Staples",
+    "Beverages":                                     "FMCG & Consumer Staples",
+    "Cigarettes & Tobacco Products":                 "FMCG & Consumer Staples",
+    "Personal Products":                             "FMCG & Consumer Staples",
+    "Household Products":                            "FMCG & Consumer Staples",
+    "Agricultural Food & other Products":            "FMCG & Consumer Staples",
+
+    # Consumer Discretionary
+    "Retailing":                                     "Consumer Discretionary",
+    "Consumer Durables":                             "Consumer Discretionary",
+    "Other Consumer Services":                       "Consumer Discretionary",
+
+    # Automobile & Auto Ancillaries
+    "Automobiles":                                   "Automobile & Auto Ancillaries",
+    "Agricultural Commercial & Construction Vehicles": "Automobile & Auto Ancillaries",
+    "Auto Components":                               "Automobile & Auto Ancillaries",
+
+    # Metals & Mining
+    "Ferrous Metals":                                "Metals & Mining",
+    "Non - Ferrous Metals":                          "Metals & Mining",
+    "Diversified Metals":                            "Metals & Mining",
+    "Minerals & Mining":                             "Metals & Mining",
+    "Metals & Minerals Trading":                     "Metals & Mining",
+
+    # Oil, Gas & Energy
+    "Oil":                                           "Oil, Gas & Energy",
+    "Petroleum Products":                            "Oil, Gas & Energy",
+    "Gas":                                           "Oil, Gas & Energy",
+    "Consumable Fuels":                              "Oil, Gas & Energy",
+    "Thermal Coal":                                  "Oil, Gas & Energy",
+
+    # Power & Utilities
+    "Power":                                         "Power & Utilities",
+    "Other Utilities":                               "Power & Utilities",
+
+    # Infrastructure & Capital Goods
+    "Construction":                                  "Infrastructure & Capital Goods",
+    "Engineering Services":                          "Infrastructure & Capital Goods",
+    "Industrial Manufacturing":                      "Infrastructure & Capital Goods",
+    "Industrial Products":                           "Infrastructure & Capital Goods",
+    "Specialty Industrial Machinery":                "Infrastructure & Capital Goods",
+    "Electrical Equipment":                          "Infrastructure & Capital Goods",
+    "Electrical Equipment & Parts":                  "Infrastructure & Capital Goods",
+    "Commercial Services & Supplies":                "Infrastructure & Capital Goods",
+
+    # Cement & Building Materials
+    "Cement & Cement Products":                      "Cement & Building Materials",
+    "Other Construction Materials":                  "Cement & Building Materials",
+
+    # Real Estate
+    "Realty":                                        "Real Estate",
+
+    # Chemicals
+    "Chemicals & Petrochemicals":                    "Chemicals",
+    "Fertilizers & Agrochemicals":                   "Chemicals",
+
+    # Telecom
+    "Telecom - Services":                            "Telecom",
+    "Telecom - Equipment & Accessories":             "Telecom",
+
+    # Media & Entertainment
+    "Entertainment":                                 "Media & Entertainment",
+    "Media":                                         "Media & Entertainment",
+    "Printing & Publication":                        "Media & Entertainment",
+
+    # Textiles
+    "Textiles & Apparels":                           "Textiles",
+    "Paper Forest & Jute Products":                  "Textiles",
+
+    # Logistics & Transportation
+    "Transport Services":                            "Logistics & Transportation",
+    "Transport Infrastructure":                      "Logistics & Transportation",
+
+    # Defence & Aerospace
+    "Aerospace & Defense":                           "Defence & Aerospace",
+
+    # Hospitality & Tourism
+    "Leisure Services":                              "Hospitality & Tourism",
+
+    # Diversified Conglomerates
+    "Diversified":                                   "Diversified Conglomerates",
+}
 
 # ---------------------------------------------------------------------------
 # NSE Free Float cache

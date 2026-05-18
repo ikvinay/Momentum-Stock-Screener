@@ -18,7 +18,7 @@ import yfinance as yf
 from config import (
     PRICE_DATA_FILE, STOCK_INFO_FILE, DATA_DIR,
     BATCH_SIZE, BATCH_DELAY_SECONDS, INFO_MAX_WORKERS,
-    STOCK_INFO_CACHE_DAYS,
+    STOCK_INFO_CACHE_DAYS, NSE_INDUSTRY_TO_SECTOR,
 )
 
 logger = logging.getLogger(__name__)
@@ -154,6 +154,58 @@ def load_stock_info() -> Optional[Dict[str, dict]]:
             logger.warning(f"stock_info.pkl corrupted ({exc}) — please re-run Fetch Data")
             os.remove(STOCK_INFO_FILE)
     return None
+
+
+def enrich_with_nse_sectors(
+    stock_info: Dict[str, dict],
+    nse_map: Dict[str, dict],
+) -> Dict[str, dict]:
+    """
+    Override "Unknown" sector/industry in stock_info with data from the NSE sector map.
+
+    Only replaces values that are missing or explicitly "Unknown"; confirmed
+    yfinance values are kept as-is.
+
+    Parameters
+    ----------
+    stock_info:
+        {yf_ticker: info_dict} as returned by fetch_stock_info / load_stock_info.
+    nse_map:
+        {yf_ticker: {"sector", "industry", "basic_industry"}} from fetch_nse_sector_map.
+
+    Returns
+    -------
+    The same stock_info dict (modified in place) with NSE data filled in.
+    """
+    _UNKNOWN = {"Unknown", None, ""}
+    enriched_sector = 0
+    enriched_industry = 0
+
+    # Pass 1 — apply NSE API values for tickers present in nse_map
+    for ticker, info in stock_info.items():
+        nse = nse_map.get(ticker)
+        if not nse:
+            continue
+        nse_industry = nse.get("industry") or ""
+        if nse_industry not in _UNKNOWN:
+            if info.get("industry") != nse_industry:
+                enriched_industry += 1
+            info["industry"] = nse_industry
+
+    # Pass 2 — derive sector from industry for ALL stocks using NSE_INDUSTRY_TO_SECTOR.
+    # This also catches stocks whose industry came from yfinance but matches the mapping.
+    for ticker, info in stock_info.items():
+        industry = info.get("industry") or ""
+        if industry not in _UNKNOWN:
+            mapped_sector = NSE_INDUSTRY_TO_SECTOR.get(industry)
+            if mapped_sector and info.get("sector") != mapped_sector:
+                info["sector"] = mapped_sector
+                enriched_sector += 1
+
+    logger.info(
+        f"NSE sector enrichment: {enriched_sector} sectors, {enriched_industry} industries updated"
+    )
+    return stock_info
 
 
 def is_info_cache_fresh() -> bool:

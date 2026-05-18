@@ -5,11 +5,9 @@ Commodities page — MCX futures momentum ranking and performance tracker.
 import streamlit as st
 import pandas as pd
 
-from ui.components import inject_css, tick, colour_pct, colour_rsi, colour_rmv, colour_rs, colour_score
+from ui.components import tick, colour_pct, colour_rsi, colour_rmv, colour_rs, colour_score
 from ui.sidebar import render_commodity_filters
 from src.pipeline import load_commodity_results, last_updated
-
-inject_css()
 
 # ---------------------------------------------------------------------------
 # Load data first so categories are available for the sidebar filter

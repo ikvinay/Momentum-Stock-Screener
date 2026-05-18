@@ -199,6 +199,29 @@ def run_data_fetch(triggered_by: str = "manual") -> None:
             save_stock_info(stock_info)
             logger.info("Stock info saved: %d tickers", len(stock_info))
 
+        # Enrich Unknown sector/industry via NSE Direct API
+        from src.nse_fetcher import fetch_nse_sector_map
+        from src.data_fetcher import enrich_with_nse_sectors
+        unknown_count = sum(
+            1 for info in stock_info.values()
+            if info.get("sector") in ("Unknown", None, "")
+        )
+        write_status(
+            "fetch", "running",
+            f"Enriching sector/industry via NSE API "
+            f"({unknown_count} stocks with Unknown sector)…",
+        )
+        def _nse_progress(done, total):
+            write_status(
+                "fetch", "running",
+                f"NSE sector map: {done}/{total} tickers fetched…",
+            )
+
+        nse_map = fetch_nse_sector_map(list(price_data.keys()), status_callback=_nse_progress)
+        stock_info = enrich_with_nse_sectors(stock_info, nse_map)
+        save_stock_info(stock_info)
+        logger.info("Stock info re-saved with NSE sector enrichment")
+
         from src.nse_freefloat import fetch_all_freefloat, save_freefloat_cache, load_freefloat_cache
         existing_ff  = load_freefloat_cache()
         all_tickers  = list(price_data.keys())

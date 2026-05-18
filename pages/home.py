@@ -3,12 +3,16 @@
 import pandas as pd
 import streamlit as st
 
-from ui.components import inject_css
 from src.pipeline import (
     load_results, load_index_results, load_commodity_results, last_updated,
+    top_industries_vs_sector,
 )
 
-inject_css()
+try:
+    from src.sector_mapper import load_index_data as _load_index_data
+    _, _sector_indices, _ = _load_index_data()
+except Exception:
+    _sector_indices = {}
 
 
 # ---------------------------------------------------------------------------
@@ -105,27 +109,15 @@ def _section_title(text: str, badge: str = "", badge_color: str = "#94a3b8",
 
 
 # ---------------------------------------------------------------------------
-# Header + timeframe toggle
+# Header
 # ---------------------------------------------------------------------------
-hc1, hc2 = st.columns([5, 1])
-with hc1:
-    st.markdown(
-        '<div style="font-size:20px;font-weight:600;color:#f1f5f9;margin-bottom:3px;">'
-        'Market highlights</div>'
-        '<div style="font-size:13px;color:#94a3b8;">'
-        'Top performers across sectors, stocks &amp; commodities</div>',
-        unsafe_allow_html=True,
-    )
-with hc2:
-    timeframe = st.radio(
-        "", ["Weekly", "Monthly"], horizontal=True,
-        label_visibility="collapsed", key="home_tf",
-    )
-
-ret_col = "Weekly %" if timeframe == "Weekly" else "Monthly %"
-
-st.markdown("<div style='margin-bottom:4px;'></div>", unsafe_allow_html=True)
-
+st.markdown(
+    '<div style="font-size:20px;font-weight:600;color:#f1f5f9;margin-bottom:3px;">'
+    'Market highlights</div>'
+    '<div style="font-size:13px;color:#94a3b8;">'
+    'Top performers across sectors, stocks &amp; commodities</div>',
+    unsafe_allow_html=True,
+)
 
 # ---------------------------------------------------------------------------
 # Load data
@@ -136,165 +128,185 @@ commodity_results = load_commodity_results()
 
 
 # ---------------------------------------------------------------------------
-# Derived aggregations
+# Timeframe tabs
 # ---------------------------------------------------------------------------
-sector_perf  = pd.Series(dtype=float)
-ind_perf     = pd.Series(dtype=float)
-top_sector   = "—"
-top_sector_v: float | None = None
-advancers    = 0
-decliners    = 0
+tab_weekly, tab_monthly = st.tabs(["  Weekly  ", "  Monthly  "])
 
-if results is not None and not results.empty and ret_col in results.columns:
-    sector_perf = (
-        results.groupby("Sector")[ret_col].mean().sort_values(ascending=False)
-    )
-    if not sector_perf.empty:
-        top_sector   = str(sector_perf.index[0])
-        top_sector_v = float(sector_perf.iloc[0])
-    ind_perf  = results.groupby("Industry")[ret_col].mean().sort_values(ascending=False)
-    advancers = int((results[ret_col] > 0).sum())
-    decliners = int((results[ret_col] <= 0).sum())
+for _tab, timeframe in [(tab_weekly, "Weekly"), (tab_monthly, "Monthly")]:
+    with _tab:
+        ret_col = "Weekly %" if timeframe == "Weekly" else "Monthly %"
 
-top_idx_name, top_idx_val = "—", None
-if index_results is not None and not index_results.empty and ret_col in index_results.columns:
-    row = index_results.dropna(subset=[ret_col]).sort_values(ret_col, ascending=False).iloc[0]
-    top_idx_name = str(row.get("Index", "—"))
-    top_idx_val  = float(row[ret_col])
+        # -------------------------------------------------------------------
+        # Derived aggregations
+        # -------------------------------------------------------------------
+        sector_perf  = pd.Series(dtype=float)
+        ind_perf     = pd.Series(dtype=float)
+        top_sector   = "—"
+        top_sector_v: float | None = None
+        advancers    = 0
+        decliners    = 0
 
-top_comm_name, top_comm_val = "—", None
-if commodity_results is not None and not commodity_results.empty and ret_col in commodity_results.columns:
-    row = commodity_results.dropna(subset=[ret_col]).sort_values(ret_col, ascending=False).iloc[0]
-    top_comm_name = str(row.get("Commodity", "—"))
-    top_comm_val  = float(row[ret_col])
+        if results is not None and not results.empty and ret_col in results.columns:
+            sector_perf = (
+                results[results["Sector"].notna() & (results["Sector"] != "Unknown")]
+                .groupby("Sector")[ret_col].mean()
+                .sort_values(ascending=False)
+            )
+            if not sector_perf.empty:
+                top_sector   = str(sector_perf.index[0])
+                top_sector_v = float(sector_perf.iloc[0])
+            advancers = int((results[ret_col] > 0).sum())
+            decliners = int((results[ret_col] <= 0).sum())
 
-
-# ---------------------------------------------------------------------------
-# ① KPI strip — 4 cards
-# ---------------------------------------------------------------------------
-k1, k2, k3, k4 = st.columns(4)
-
-with k1:
-    st.markdown(
-        _kpi_card("TOP SECTOR", top_sector,
-                  f"{top_sector_v:+.1f}%" if top_sector_v is not None else "—",
-                  _pct_color(top_sector_v or 0)),
-        unsafe_allow_html=True,
-    )
-with k2:
-    st.markdown(
-        _kpi_card("TOP INDEX", top_idx_name,
-                  f"{top_idx_val:+.1f}%" if top_idx_val is not None else "—",
-                  _pct_color(top_idx_val or 0)),
-        unsafe_allow_html=True,
-    )
-with k3:
-    st.markdown(
-        _kpi_card("TOP COMMODITY", top_comm_name,
-                  f"{top_comm_val:+.1f}%" if top_comm_val is not None else "—",
-                  _pct_color(top_comm_val or 0)),
-        unsafe_allow_html=True,
-    )
-with k4:
-    st.markdown(
-        _kpi_card("MARKET BREADTH", f"{advancers} / {decliners}",
-                  "advancers vs decliners", "#94a3b8"),
-        unsafe_allow_html=True,
-    )
-
-st.markdown("<div style='margin-bottom:6px;'></div>", unsafe_allow_html=True)
-
-
-# ---------------------------------------------------------------------------
-# ② Top sectors + industries
-# ---------------------------------------------------------------------------
-sc1, sc2 = st.columns(2, gap="large")
-
-with sc1:
-    with st.container(border=True):
-        st.markdown(
-            _section_title("Top performing sectors", badge=timeframe),
-            unsafe_allow_html=True,
-        )
-        items = [{"n": k, "v": float(v)} for k, v in sector_perf.head(5).items()]
-        st.markdown(_bar_list(items, ranked=True), unsafe_allow_html=True)
-
-with sc2:
-    with st.container(border=True):
-        st.markdown(
-            _section_title("Top performing industries"),
-            unsafe_allow_html=True,
-        )
-        items = [{"n": k, "v": float(v)} for k, v in ind_perf.head(5).items()]
-        st.markdown(_bar_list(items, ranked=True), unsafe_allow_html=True)
-
-
-# ---------------------------------------------------------------------------
-# ③ Top stocks from leading sector
-# ---------------------------------------------------------------------------
-if results is not None and not results.empty and top_sector != "—":
-    sector_stocks = (
-        results[results["Sector"] == top_sector]
-        .sort_values("Score", ascending=False)
-        .head(4)
-    )
-    with st.container(border=True):
-        st.markdown(
-            _section_title(
-                "Top stocks from leading sector",
-                badge=top_sector,
-                badge_color="#60a5fa",
-                badge_bg="rgba(96,165,250,0.12)",
-            ),
-            unsafe_allow_html=True,
-        )
-        if not sector_stocks.empty:
-            stocks = []
-            for _, row in sector_stocks.iterrows():
-                rv  = row.get(ret_col)
-                ret = float(rv) if rv is not None and pd.notna(rv) else 0.0
-                cmp = row.get("CMP")
-                stocks.append({
-                    "ticker": str(row["Symbol"]),
-                    "name":   (str(row.get("Company", "") or ""))[:30],
-                    "cmp":    f"₹{cmp:,.1f}" if cmp is not None and pd.notna(cmp) else "—",
-                    "ret":    ret,
-                })
-            st.markdown(_stock_grid(stocks), unsafe_allow_html=True)
-
-
-# ---------------------------------------------------------------------------
-# ④ Themes & Indices + Commodities
-# ---------------------------------------------------------------------------
-ic1, ic2 = st.columns(2, gap="large")
-
-with ic1:
-    with st.container(border=True):
-        st.markdown(_section_title("Top themes &amp; indices"), unsafe_allow_html=True)
+        top_idx_name, top_idx_val = "—", None
         if index_results is not None and not index_results.empty and ret_col in index_results.columns:
-            top_idx = (
-                index_results.dropna(subset=[ret_col])
-                .sort_values(ret_col, ascending=False)
-                .head(5)
-            )
-            items = [{"n": r["Index"], "v": float(r[ret_col])} for _, r in top_idx.iterrows()]
-            st.markdown(_bar_list(items), unsafe_allow_html=True)
-        else:
-            st.caption("No index data.")
+            row = index_results.dropna(subset=[ret_col]).sort_values(ret_col, ascending=False).iloc[0]
+            top_idx_name = str(row.get("Index", "—"))
+            top_idx_val  = float(row[ret_col])
 
-with ic2:
-    with st.container(border=True):
-        st.markdown(_section_title("Top performing commodities"), unsafe_allow_html=True)
+        top_comm_name, top_comm_val = "—", None
         if commodity_results is not None and not commodity_results.empty and ret_col in commodity_results.columns:
-            top_comm_df = (
-                commodity_results.dropna(subset=[ret_col])
-                .sort_values(ret_col, ascending=False)
-                .head(5)
+            row = commodity_results.dropna(subset=[ret_col]).sort_values(ret_col, ascending=False).iloc[0]
+            top_comm_name = str(row.get("Commodity", "—"))
+            top_comm_val  = float(row[ret_col])
+
+        # -------------------------------------------------------------------
+        # ① KPI strip — 4 cards
+        # -------------------------------------------------------------------
+        k1, k2, k3, k4 = st.columns(4)
+
+        with k1:
+            st.markdown(
+                _kpi_card("TOP SECTOR", top_sector,
+                          f"{top_sector_v:+.1f}%" if top_sector_v is not None else "—",
+                          _pct_color(top_sector_v or 0)),
+                unsafe_allow_html=True,
             )
-            items = [{"n": r["Commodity"], "v": float(r[ret_col])} for _, r in top_comm_df.iterrows()]
-            st.markdown(_bar_list(items), unsafe_allow_html=True)
-        else:
-            st.caption("No commodity data.")
+        with k2:
+            st.markdown(
+                _kpi_card("TOP INDEX", top_idx_name,
+                          f"{top_idx_val:+.1f}%" if top_idx_val is not None else "—",
+                          _pct_color(top_idx_val or 0)),
+                unsafe_allow_html=True,
+            )
+        with k3:
+            st.markdown(
+                _kpi_card("TOP COMMODITY", top_comm_name,
+                          f"{top_comm_val:+.1f}%" if top_comm_val is not None else "—",
+                          _pct_color(top_comm_val or 0)),
+                unsafe_allow_html=True,
+            )
+        with k4:
+            st.markdown(
+                _kpi_card("MARKET BREADTH", f"{advancers} / {decliners}",
+                          "advancers vs decliners", "#94a3b8"),
+                unsafe_allow_html=True,
+            )
+
+        st.markdown("<div style='margin-bottom:6px;'></div>", unsafe_allow_html=True)
+
+        # -------------------------------------------------------------------
+        # ② Top sectors + industries
+        # -------------------------------------------------------------------
+        sc1, sc2 = st.columns(2, gap="large")
+
+        with sc1:
+            with st.container(border=True):
+                st.markdown(
+                    _section_title("Top performing sectors", badge=timeframe),
+                    unsafe_allow_html=True,
+                )
+                items = [{"n": k, "v": float(v)} for k, v in sector_perf.head(5).items()]
+                st.markdown(_bar_list(items, ranked=True), unsafe_allow_html=True)
+
+        with sc2:
+            with st.container(border=True):
+                st.markdown(
+                    _section_title("Industries outperforming their Sector", badge=timeframe),
+                    unsafe_allow_html=True,
+                )
+                if results is not None and not results.empty:
+                    top_inds = top_industries_vs_sector(results, _sector_indices, top_n=5)
+                    if top_inds:
+                        items = [
+                            {
+                                "n": f"{r['industry']}  ·  {r['sector']}",
+                                "v": float(r["outperf"]),
+                                "u": f"{r['n_stocks']} stocks",
+                            }
+                            for r in top_inds
+                        ]
+                        st.markdown(_bar_list(items, ranked=True), unsafe_allow_html=True)
+                    else:
+                        st.caption("No data — run the screener first.")
+                else:
+                    st.caption("No data.")
+
+        # -------------------------------------------------------------------
+        # ③ Top stocks from leading sector
+        # -------------------------------------------------------------------
+        if results is not None and not results.empty and top_sector != "—":
+            sector_stocks = (
+                results[results["Sector"] == top_sector]
+                .sort_values("Score", ascending=False)
+                .head(4)
+            )
+            with st.container(border=True):
+                st.markdown(
+                    _section_title(
+                        "Top stocks from leading sector",
+                        badge=top_sector,
+                        badge_color="#60a5fa",
+                        badge_bg="rgba(96,165,250,0.12)",
+                    ),
+                    unsafe_allow_html=True,
+                )
+                if not sector_stocks.empty:
+                    stocks = []
+                    for _, row in sector_stocks.iterrows():
+                        rv  = row.get(ret_col)
+                        ret = float(rv) if rv is not None and pd.notna(rv) else 0.0
+                        cmp = row.get("CMP")
+                        stocks.append({
+                            "ticker": str(row["Symbol"]),
+                            "name":   (str(row.get("Company", "") or ""))[:30],
+                            "cmp":    f"₹{cmp:,.1f}" if cmp is not None and pd.notna(cmp) else "—",
+                            "ret":    ret,
+                        })
+                    st.markdown(_stock_grid(stocks), unsafe_allow_html=True)
+
+        # -------------------------------------------------------------------
+        # ④ Themes & Indices + Commodities
+        # -------------------------------------------------------------------
+        ic1, ic2 = st.columns(2, gap="large")
+
+        with ic1:
+            with st.container(border=True):
+                st.markdown(_section_title("Top themes &amp; indices"), unsafe_allow_html=True)
+                if index_results is not None and not index_results.empty and ret_col in index_results.columns:
+                    top_idx = (
+                        index_results.dropna(subset=[ret_col])
+                        .sort_values(ret_col, ascending=False)
+                        .head(5)
+                    )
+                    items = [{"n": r["Index"], "v": float(r[ret_col])} for _, r in top_idx.iterrows()]
+                    st.markdown(_bar_list(items), unsafe_allow_html=True)
+                else:
+                    st.caption("No index data.")
+
+        with ic2:
+            with st.container(border=True):
+                st.markdown(_section_title("Top performing commodities"), unsafe_allow_html=True)
+                if commodity_results is not None and not commodity_results.empty and ret_col in commodity_results.columns:
+                    top_comm_df = (
+                        commodity_results.dropna(subset=[ret_col])
+                        .sort_values(ret_col, ascending=False)
+                        .head(5)
+                    )
+                    items = [{"n": r["Commodity"], "v": float(r[ret_col])} for _, r in top_comm_df.iterrows()]
+                    st.markdown(_bar_list(items), unsafe_allow_html=True)
+                else:
+                    st.caption("No commodity data.")
 
 
 # ---------------------------------------------------------------------------

@@ -100,12 +100,12 @@ def tick(val: bool) -> str:
 # ---------------------------------------------------------------------------
 
 DISPLAY_COLS_HEAD = [
-    "Symbol", "Company", "CMP", "Score", "RS Rating",
-    "Sentiment", "News Vol", "Reddit",
-    "RSI", "RMV", "% from 52W High",
+    "Symbol", "Company", "Score", "RS Rating",
+    "Sentiment",
+    "% from 52W High",
     "Weekly %", "Monthly %", "Benchmark Outperf %", "Sector Outperf %",
 ]
-DISPLAY_COLS_TAIL = ["PE", "Free Float %", "Market Cap (Cr)"]
+DISPLAY_COLS_TAIL = ["Free Float %"]
 
 STYLE_COLS = {
     "Weekly %":            colour_pct,
@@ -208,55 +208,49 @@ def inject_css() -> None:
 .ti-warning { color: #f59e0b; }
 
 /* =====================================================================
-   SIDEBAR — Enterprise skin
+   SIDEBAR — Redesigned nav (heuristic-driven)
    ===================================================================== */
 
-/* Shell background + right border */
+/* ── Shell ──────────────────────────────────────────────────────────── */
 section[data-testid="stSidebar"] {
-    background-color: #0d1117 !important;
-    border-right: 1px solid rgba(255,255,255,0.07) !important;
-    min-width: 264px !important;
-    max-width: 264px !important;
+    background-color: #080c12 !important;
+    border-right: 1px solid rgba(255,255,255,0.06) !important;
+    min-width: 272px !important;
+    max-width: 272px !important;
 }
-/* Slim custom scrollbar */
-section[data-testid="stSidebar"] { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.1) transparent; }
+section[data-testid="stSidebar"] { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.08) transparent; }
 section[data-testid="stSidebar"]::-webkit-scrollbar { width: 3px; }
 section[data-testid="stSidebar"]::-webkit-scrollbar-track { background: transparent; }
-section[data-testid="stSidebar"]::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 2px; }
-section[data-testid="stSidebar"]::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.22); }
+section[data-testid="stSidebar"]::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
 
-/* ── App title rendered via CSS before the nav container ────────────── */
-section[data-testid="stSidebar"] > div:first-child::before {
-    content: "Market Insights";
-    display: block;
-    padding: 20px 16px 3px 16px;
-    font-size: 15px;
-    font-weight: 700;
-    color: #f1f5f9;
-    letter-spacing: -0.01em;
-    line-height: 1.3;
-}
-
-/* ── Subtitle + horizontal rule injected inside nav (before nav items) */
-[data-testid="stSidebarNav"]::before {
-    content: "NSE Nifty 1000  ·  Daily Refresh";
-    display: block;
-    padding: 0 16px 10px 16px;
-    font-size: 10.5px;
-    color: #475569;
-    letter-spacing: 0.03em;
-    border-bottom: 1px solid rgba(255,255,255,0.06);
-    margin-bottom: 2px;
-}
-
-/* ── Nav container ─────────────────────────────────────────────────── */
-[data-testid="stSidebarNav"] {
-    padding: 2px 0 2px 0 !important;
+/* ── App header ─────────────────────────────────────────────────────── */
+[data-testid="stSidebarHeader"] {
+    height: auto !important;
+    min-height: 64px !important;
+    padding: 18px 10px 16px 18px !important;
     border-bottom: 1px solid rgba(255,255,255,0.06) !important;
-    margin-bottom: 2px !important;
+    margin-bottom: 0 !important;
+    background: #080c12 !important;
+}
+[data-testid="stSidebarLogo"] {
+    flex: 1 !important;
+    display: flex !important;
+    align-items: center !important;
+}
+[data-testid="stSidebarLogo"] img.stLogo {
+    height: 50px !important;
+    width: auto !important;
+    max-width: 240px !important;
 }
 
-/* Remove default background/border Streamlit puts on nav items */
+/* ── Nav container ──────────────────────────────────────────────────── */
+[data-testid="stSidebarNav"] {
+    padding: 10px 0 10px 0 !important;
+    border-bottom: 1px solid rgba(255,255,255,0.06) !important;
+    margin-bottom: 0 !important;
+}
+
+/* Strip Streamlit's default wrapper chrome */
 [data-testid="stSidebarNavLink"] {
     background: transparent !important;
     border: none !important;
@@ -265,100 +259,118 @@ section[data-testid="stSidebar"] > div:first-child::before {
     border-radius: 0 !important;
 }
 
-/* The actual anchor element — left-edge of text aligns with title at ~18px */
+/* ── Nav item link ──────────────────────────────────────────────────── */
 [data-testid="stSidebarNavLink"] a {
     display: flex !important;
     align-items: center !important;
-    gap: 8px !important;
-    padding: 7px 12px 7px 12px !important;
-    margin: 1px 4px !important;
-    border-radius: 7px !important;
-    font-size: 13px !important;
+    gap: 10px !important;
+    padding: 9px 14px 9px 16px !important;
+    margin: 2px 8px !important;
+    border-radius: 8px !important;
+    font-size: 14px !important;
     font-weight: 500 !important;
     color: #64748b !important;
     text-decoration: none !important;
-    border-left: 2px solid transparent !important;
+    border-left: 3px solid transparent !important;
     transition: background 0.15s, color 0.15s, border-color 0.15s !important;
     letter-spacing: 0.01em !important;
 }
+
+/* Hover — reveal but don't commit */
 [data-testid="stSidebarNavLink"] a:hover {
-    background: rgba(255,255,255,0.05) !important;
-    color: #cbd5e1 !important;
+    background: rgba(255,255,255,0.04) !important;
+    color: #94a3b8 !important;
 }
 
-/* Active page — indigo accent */
+/* ── Active page — high-contrast solid fill + left rail ────────────── */
 [data-testid="stSidebarNavLink"] a[aria-current="page"] {
-    background: rgba(99,102,241,0.12) !important;
-    color: #a5b4fc !important;
+    background: rgba(99,102,241,0.14) !important;
+    color: #c7d2fe !important;
     border-left-color: #6366f1 !important;
     font-weight: 600 !important;
 }
 [data-testid="stSidebarNavLink"] a[aria-current="page"]:hover {
-    background: rgba(99,102,241,0.18) !important;
+    background: rgba(99,102,241,0.20) !important;
 }
 
-/* Nav icon sizing — matches nav text */
+/* ── Icons — full opacity on active, dimmed on inactive ─────────────── */
 [data-testid="stSidebarNavLink"] a span:first-child {
-    font-size: 14px !important;
-    opacity: 0.8;
+    font-size: 16px !important;
+    opacity: 0.45 !important;
+    transition: opacity 0.15s !important;
+}
+[data-testid="stSidebarNavLink"] a:hover span:first-child {
+    opacity: 0.7 !important;
 }
 [data-testid="stSidebarNavLink"] a[aria-current="page"] span:first-child {
-    opacity: 1;
+    opacity: 1 !important;
 }
 
-/* Hide Admin page from sidebar nav */
+/* Hide Admin from nav (accessible via top-right gear or direct URL) */
 [data-testid="stSidebarNavLink"]:has(a[href*="admin" i]) {
     display: none !important;
 }
 
-/* ── User-content area (below nav) ──────────────────────────────────── */
+/* ── Controls area (below nav) ──────────────────────────────────────── */
 [data-testid="stSidebarUserContent"] {
-    padding: 12px 10px 20px !important;
+    padding: 16px 10px 24px !important;
 }
 
-/* ── Expanders in sidebar ───────────────────────────────────────────── */
+/* Section label injected above user-content area */
+[data-testid="stSidebarUserContent"]::before {
+    content: "CONTROLS";
+    display: block;
+    font-size: 9.5px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    color: #334155;
+    padding: 0 8px 10px 8px;
+    text-transform: uppercase;
+}
+
+/* ── Expanders ──────────────────────────────────────────────────────── */
 [data-testid="stSidebar"] details {
     background: rgba(255,255,255,0.02) !important;
-    border: 1px solid rgba(255,255,255,0.08) !important;
-    border-radius: 10px !important;
+    border: 1px solid rgba(255,255,255,0.07) !important;
+    border-radius: 8px !important;
     overflow: hidden !important;
-    margin-bottom: 8px !important;
+    margin-bottom: 6px !important;
 }
 [data-testid="stSidebar"] details > summary {
-    padding: 10px 14px !important;
+    padding: 9px 14px !important;
     cursor: pointer !important;
     list-style: none !important;
 }
 [data-testid="stSidebar"] details > summary::-webkit-details-marker { display: none; }
 [data-testid="stSidebar"] details > summary p {
-    font-size: 11.5px !important;
+    font-size: 11px !important;
     font-weight: 700 !important;
-    letter-spacing: 0.07em !important;
+    letter-spacing: 0.08em !important;
     text-transform: uppercase !important;
-    color: #94a3b8 !important;
+    color: #64748b !important;
 }
 [data-testid="stSidebar"] details[open] > summary {
-    border-bottom: 1px solid rgba(255,255,255,0.07) !important;
+    border-bottom: 1px solid rgba(255,255,255,0.06) !important;
 }
 [data-testid="stSidebar"] details > div {
     padding: 10px 12px 12px !important;
 }
 
-/* ── Bordered containers inside sidebar ─────────────────────────────── */
+/* ── Bordered containers ────────────────────────────────────────────── */
 [data-testid="stSidebar"] [data-testid="stVerticalBlockBorderWrapper"] {
     background: rgba(255,255,255,0.02) !important;
     border: 1px solid rgba(255,255,255,0.07) !important;
-    border-radius: 10px !important;
+    border-radius: 8px !important;
     padding: 10px 12px !important;
-    margin-bottom: 8px !important;
+    margin-bottom: 6px !important;
 }
 
-/* ── Buttons inside sidebar ─────────────────────────────────────────── */
+/* ── Buttons ────────────────────────────────────────────────────────── */
 [data-testid="stSidebar"] .stButton > button {
     width: 100% !important;
-    background: rgba(255,255,255,0.04) !important;
-    border: 1px solid rgba(255,255,255,0.09) !important;
-    color: #94a3b8 !important;
+    background: rgba(255,255,255,0.03) !important;
+    border: 1px solid rgba(255,255,255,0.08) !important;
+    color: #64748b !important;
     border-radius: 7px !important;
     font-size: 12.5px !important;
     font-weight: 500 !important;
@@ -367,12 +379,12 @@ section[data-testid="stSidebar"] > div:first-child::before {
     letter-spacing: 0.01em !important;
 }
 [data-testid="stSidebar"] .stButton > button:hover:not(:disabled) {
-    background: rgba(255,255,255,0.08) !important;
-    border-color: rgba(255,255,255,0.18) !important;
-    color: #e2e8f0 !important;
+    background: rgba(255,255,255,0.07) !important;
+    border-color: rgba(255,255,255,0.15) !important;
+    color: #cbd5e1 !important;
 }
 [data-testid="stSidebar"] .stButton > button:disabled {
-    opacity: 0.3 !important;
+    opacity: 0.25 !important;
     cursor: not-allowed !important;
 }
 
@@ -750,8 +762,16 @@ def render_stock_chart(symbol: str, price_data: dict, lookback: int = 90) -> Non
 # Relative Rotation Graph chart
 # ---------------------------------------------------------------------------
 
-def render_rrg_chart(rrg_df: pd.DataFrame, title: str = "Relative Rotation Graph") -> None:
-    """Render a Relative Rotation Graph (RRG) scatter chart with quadrant shading and trails."""
+def render_rrg_chart(
+    rrg_df: pd.DataFrame,
+    title: str = "Relative Rotation Graph",
+    key: str = "rrg_chart",
+    on_select: str = "ignore",
+) -> object:
+    """Render a Relative Rotation Graph (RRG) scatter chart with quadrant shading and trails.
+
+    Returns the plotly_chart event object (selection data available when on_select='rerun').
+    """
     import plotly.graph_objects as go
     from src.rrg import QUADRANT_FILL, QUADRANT_COLORS
 
@@ -836,12 +856,12 @@ def render_rrg_chart(rrg_df: pd.DataFrame, title: str = "Relative Rotation Graph
             textposition="top center",
             textfont=dict(size=8, color="#e2e8f0"),
             name=name,
-            customdata=[[row["rs_ratio"], row["rs_momentum"], row["quadrant"]]],
+            customdata=[[name, row["rs_ratio"], row["rs_momentum"], row["quadrant"]]],
             hovertemplate=(
                 f"<b>{name}</b><br>"
-                "RS-Ratio: %{customdata[0]:.2f}<br>"
-                "RS-Momentum: %{customdata[1]:.2f}<br>"
-                "Quadrant: %{customdata[2]}"
+                "RS-Ratio: %{customdata[1]:.2f}<br>"
+                "RS-Momentum: %{customdata[2]:.2f}<br>"
+                "Quadrant: %{customdata[3]}"
                 "<extra></extra>"
             ),
         ))
@@ -871,7 +891,13 @@ def render_rrg_chart(rrg_df: pd.DataFrame, title: str = "Relative Rotation Graph
         height=580,
         margin=dict(l=65, r=20, t=45, b=65),
     )
-    st.plotly_chart(fig, use_container_width=True)
+    return st.plotly_chart(
+        fig,
+        use_container_width=True,
+        key=key,
+        on_select=on_select,
+        selection_mode="points",
+    )
 
 
 # ---------------------------------------------------------------------------

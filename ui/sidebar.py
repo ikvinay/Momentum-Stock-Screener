@@ -162,21 +162,21 @@ def render_stock_filters() -> dict:
             placeholder="Any pattern",
         )
 
-        min_score = st.slider("Min Score",     0,  100, 50, step=5)
-        min_rs    = st.slider("Min RS Rating", 1,   99, 75)
-        rsi_range = st.slider("RSI Range",     0,  100, (0, 100))
+        min_score = st.slider("Min Score",     0,  100, 80, step=5)
+        min_rs    = st.slider("Min RS Rating", 1,   99, 85)
+        rsi_range = st.slider("RSI Range",     0,  100, (55, 80))
         max_rmv   = st.select_slider(
             "Max RMV",
-            options=list(range(100, -1, -1)),
-            value=100,
+            options=list(range(0, 101)),
+            value=50,
             help="RMV < 15 = compressed / tight bar.",
         )
-        min_float = st.select_slider(
-            "Min Free Float %",
-            options=[0, 10, 15, 20, 25, 30, 40, 50, 60, 70, 80],
-            value=0,
-            format_func=lambda v: "Any" if v == 0 else f"{v}%",
-            help="Show only stocks with known Free Float ≥ this value. 'Any' includes stocks with no data.",
+        max_float = st.select_slider(
+            "Max Free Float %",
+            options=[10, 15, 20, 25, 30, 40, 50, 60, 70, 80, 100],
+            value=30,
+            format_func=lambda v: "Any" if v == 100 else f"{v}%",
+            help="Show only stocks with Free Float ≤ this value. Lower = more tightly held.",
         )
         cap_range = st.select_slider(
             "Market Cap Range",
@@ -211,7 +211,7 @@ def render_stock_filters() -> dict:
         "min_rs":           min_rs,
         "rsi_range":        rsi_range,
         "max_rmv":          max_rmv,
-        "min_float":        min_float,
+        "max_float":        max_float,
         "cap_min":          cap_min,
         "cap_max":          cap_max,
     }
